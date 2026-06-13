@@ -1,6 +1,9 @@
 # Build output
 target/
 
+# Python bytecode cache
+__pycache__/
+
 # IDE files
 .idea/
 *.iml

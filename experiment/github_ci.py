@@ -63,8 +63,12 @@ def reset_worktree_to(worktree, base):
 
 
 def commit_and_push(worktree, branch, message):
-    """Commits everything in the worktree and pushes the branch. Returns the SHA."""
+    """Commits everything in the worktree and pushes the branch. Returns the SHA,
+    or None if there was nothing to commit (the AI returned an identical answer)."""
     _run(["git", "add", "-A"], worktree)
+    status = _run(["git", "status", "--porcelain"], worktree, check=False)
+    if not status.stdout.strip():
+        return None
     _run(["git", "commit", "-m", message], worktree)
     _run(["git", "push", "-u", "origin", branch], worktree)
     return _run(["git", "rev-parse", "HEAD"], worktree).stdout.strip()

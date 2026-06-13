@@ -199,7 +199,10 @@ def run_cell(baseline, approach, run_number, args):
 
             seen_before = ci.run_ids(branch)
             message = "%s / %s / run %d / iteration %d" % (baseline, approach["name"], run_number, iterations)
-            ci.commit_and_push(worktree, branch, message)
+            committed = ci.commit_and_push(worktree, branch, message)
+            if committed is None:
+                print("    iteration %d: the AI produced no change; stopping" % iterations)
+                break
             pushed = True
             if iterations == 1:
                 pr_url = ci.create_pr(
@@ -220,9 +223,10 @@ def run_cell(baseline, approach, run_number, args):
                   % (iterations, build_passed, behaviour_passed, violation_count))
 
             if build_passed and violation_count == 0:
-                break  # gate is green
-            if result["report"] is not None:
-                report_text = json.dumps(result["report"])  # feed back into the next loop
+                break  # gate is green, done
+            if result["report"] is None:
+                break  # build failed: no violation report to feed back, so looping cannot help
+            report_text = json.dumps(result["report"])  # feed the violations back for the next iteration
     finally:
         ci.remove_worktree(worktree)
         if not pushed:
@@ -279,7 +283,9 @@ def parse_args():
     parser.add_argument("--approaches", nargs="*", default=APPROACH_NAMES,
                         choices=APPROACH_NAMES, help="which approaches to run")
     parser.add_argument("--runs", type=int, default=RUNS_PER_CELL,
-                        help="how many runs per (baseline x approach)")
+                        help="last run number per (baseline x approach)")
+    parser.add_argument("--start-run", type=int, default=1,
+                        help="first run number (use to add runs without redoing existing ones)")
     parser.add_argument("--max-iters", type=int, default=MAX_ITERS,
                         help="max loop iterations for loop approaches")
     return parser.parse_args()
@@ -302,7 +308,7 @@ def main():
 
     for name in args.approaches:
         approach = approach_by_name(name)
-        for run_number in range(1, args.runs + 1):
+        for run_number in range(args.start_run, args.runs + 1):
             print("== %s / %s / run %d ==" % (baseline, name, run_number))
             try:
                 rows.append(run_cell(baseline, approach, run_number, args))
