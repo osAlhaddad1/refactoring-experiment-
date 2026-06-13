@@ -16,26 +16,19 @@ public class CustomerRepositoryAdapter implements CustomerRepository {
     @Override
     public Customer save(Customer customer) {
         CustomerEntity entity = new CustomerEntity();
-        entity.id = customer.getId();
-        entity.name = customer.getName();
-        entity.loyaltyPoints = customer.getLoyaltyPoints();
-        
+        entity.setId(customer.getId());
+        entity.setName(customer.getName());
+        entity.setLoyaltyPoints(customer.getLoyaltyPoints());
         CustomerEntity saved = repository.save(entity);
-        
-        customer.setId(saved.id);
-        customer.setName(saved.name);
-        customer.setLoyaltyPoints(saved.loyaltyPoints);
-        return customer;
+        return new Customer(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     @Override
     public Optional<Customer> findById(Long id) {
-        return repository.findById(id).map(entity -> {
-            Customer customer = new Customer();
-            customer.setId(entity.id);
-            customer.setName(entity.name);
-            customer.setLoyaltyPoints(entity.loyaltyPoints);
-            return customer;
-        });
+        return repository.findById(id).map(entity -> new Customer(
+            entity.getId(),
+            entity.getName(),
+            entity.getLoyaltyPoints()
+        ));
     }
 }

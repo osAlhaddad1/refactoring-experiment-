@@ -18,58 +18,49 @@ public class OrderRepositoryAdapter implements OrderRepository {
     @Override
     public OrderHeader save(OrderHeader order) {
         OrderHeaderEntity entity = new OrderHeaderEntity();
-        entity.id = order.getId();
-        entity.customerId = order.getCustomerId();
-        entity.status = order.getStatus();
-        entity.total = order.getTotal();
-        if (order.getLines() != null) {
-            entity.lines = order.getLines().stream().map(line -> {
-                OrderLineEntity le = new OrderLineEntity();
-                le.id = line.getId();
-                le.productId = line.getProductId();
-                le.quantity = line.getQuantity();
-                le.linePrice = line.getLinePrice();
-                return le;
-            }).collect(Collectors.toList());
-        }
+        entity.setId(order.getId());
+        entity.setCustomerId(order.getCustomerId());
+        entity.setStatus(order.getStatus());
+        entity.setTotal(order.getTotal());
+        entity.setLines(order.getLines().stream().map(line -> {
+            OrderLineEntity le = new OrderLineEntity();
+            le.setId(line.getId());
+            le.setProductId(line.getProductId());
+            le.setQuantity(line.getQuantity());
+            le.setLinePrice(line.getLinePrice());
+            return le;
+        }).collect(Collectors.toList()));
 
         OrderHeaderEntity saved = repository.save(entity);
-
-        order.setId(saved.id);
-        order.setCustomerId(saved.customerId);
-        order.setStatus(saved.status);
-        order.setTotal(saved.total);
-        if (saved.lines != null) {
-            order.setLines(saved.lines.stream().map(le -> {
-                OrderLine line = new OrderLine();
-                line.setId(le.id);
-                line.setProductId(le.productId);
-                line.setQuantity(le.quantity);
-                line.setLinePrice(le.linePrice);
-                return line;
-            }).collect(Collectors.toList()));
-        }
-        return order;
+        
+        OrderHeader result = new OrderHeader();
+        result.setId(saved.getId());
+        result.setCustomerId(saved.getCustomerId());
+        result.setStatus(saved.getStatus());
+        result.setTotal(saved.getTotal());
+        result.setLines(saved.getLines().stream().map(le -> new OrderLine(
+            le.getId(),
+            le.getProductId(),
+            le.getQuantity(),
+            le.getLinePrice()
+        )).collect(Collectors.toList()));
+        return result;
     }
 
     @Override
     public Optional<OrderHeader> findById(Long id) {
         return repository.findById(id).map(entity -> {
             OrderHeader order = new OrderHeader();
-            order.setId(entity.id);
-            order.setCustomerId(entity.customerId);
-            order.setStatus(entity.status);
-            order.setTotal(entity.total);
-            if (entity.lines != null) {
-                order.setLines(entity.lines.stream().map(le -> {
-                    OrderLine line = new OrderLine();
-                    line.setId(le.id);
-                    line.setProductId(le.productId);
-                    line.setQuantity(le.quantity);
-                    line.setLinePrice(le.linePrice);
-                    return line;
-                }).collect(Collectors.toList()));
-            }
+            order.setId(entity.getId());
+            order.setCustomerId(entity.getCustomerId());
+            order.setStatus(entity.getStatus());
+            order.setTotal(entity.getTotal());
+            order.setLines(entity.getLines().stream().map(le -> new OrderLine(
+                le.getId(),
+                le.getProductId(),
+                le.getQuantity(),
+                le.getLinePrice()
+            )).collect(Collectors.toList()));
             return order;
         });
     }

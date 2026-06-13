@@ -1,4 +1,4 @@
-package com.example.shop.application;
+package com.example.shop.presentation;
 
 public class OrderLineDto {
     private Long id;

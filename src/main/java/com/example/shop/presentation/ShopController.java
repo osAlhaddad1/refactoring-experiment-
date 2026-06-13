@@ -1,13 +1,12 @@
 package com.example.shop.presentation;
 
-import com.example.shop.application.*;
+import com.example.shop.application.ShopService;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
 public class ShopController {
-
     private final ShopService shopService;
 
     public ShopController(ShopService shopService) {
@@ -15,63 +14,69 @@ public class ShopController {
     }
 
     @PostMapping("/customers")
-    public CustomerResponse createCustomer(@RequestBody CreateCustomerRequest request) {
-        CustomerDto dto = shopService.createCustomer(request.name);
-        return mapToResponse(dto);
+    public CustomerDto createCustomer(@RequestBody CustomerDto customer) {
+        com.example.shop.application.CustomerDto appDto = new com.example.shop.application.CustomerDto(
+            customer.getId(), customer.getName(), customer.getLoyaltyPoints()
+        );
+        com.example.shop.application.CustomerDto saved = shopService.createCustomer(appDto);
+        return new CustomerDto(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     @GetMapping("/customers/{id}")
-    public CustomerResponse getCustomer(@PathVariable Long id) {
-        CustomerDto dto = shopService.getCustomer(id);
-        return mapToResponse(dto);
+    public CustomerDto getCustomer(@PathVariable Long id) {
+        com.example.shop.application.CustomerDto saved = shopService.getCustomer(id);
+        return new CustomerDto(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     @PostMapping("/products")
-    public ProductResponse createProduct(@RequestBody CreateProductRequest request) {
-        ProductDto dto = shopService.createProduct(request.name, request.price, request.stock);
-        return mapToResponse(dto);
+    public ProductDto createProduct(@RequestBody ProductDto product) {
+        com.example.shop.application.ProductDto appDto = new com.example.shop.application.ProductDto(
+            product.getId(), product.getName(), product.getPrice(), product.getStock()
+        );
+        com.example.shop.application.ProductDto saved = shopService.createProduct(appDto);
+        return new ProductDto(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock());
     }
 
     @GetMapping("/products/{id}")
-    public ProductResponse getProduct(@PathVariable Long id) {
-        ProductDto dto = shopService.getProduct(id);
-        return mapToResponse(dto);
+    public ProductDto getProduct(@PathVariable Long id) {
+        com.example.shop.application.ProductDto saved = shopService.getProduct(id);
+        return new ProductDto(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock());
     }
 
     @PostMapping("/orders")
-    public OrderResponse placeOrder(@RequestBody PlaceOrderRequest request) {
-        List<OrderLineInput> inputs = null;
-        if (request.lines != null) {
-            inputs = request.lines.stream()
-                    .map(line -> new OrderLineInput(line.productId, line.quantity))
-                    .collect(Collectors.toList());
-        }
-        OrderHeaderDto dto = shopService.placeOrder(request.customerId, inputs);
-        return mapToResponse(dto);
+    public OrderHeaderDto placeOrder(@RequestBody OrderHeaderDto order) {
+        com.example.shop.application.OrderHeaderDto appDto = new com.example.shop.application.OrderHeaderDto();
+        appDto.setCustomerId(order.getCustomerId());
+        appDto.setLines(order.getLines().stream().map(line -> new com.example.shop.application.OrderLineDto(
+            line.getId(), line.getProductId(), line.getQuantity(), line.getLinePrice()
+        )).collect(Collectors.toList()));
+
+        com.example.shop.application.OrderHeaderDto saved = shopService.placeOrder(appDto);
+        return mapToPresentationDto(saved);
     }
 
     @GetMapping("/orders/{id}")
-    public OrderResponse getOrder(@PathVariable Long id) {
-        OrderHeaderDto dto = shopService.getOrder(id);
-        return mapToResponse(dto);
+    public OrderHeaderDto getOrder(@PathVariable Long id) {
+        com.example.shop.application.OrderHeaderDto saved = shopService.getOrder(id);
+        return mapToPresentationDto(saved);
     }
 
     @PostMapping("/orders/{id}/pay")
-    public OrderResponse payOrder(@PathVariable Long id) {
-        OrderHeaderDto dto = shopService.payOrder(id);
-        return mapToResponse(dto);
+    public OrderHeaderDto payOrder(@PathVariable Long id) {
+        com.example.shop.application.OrderHeaderDto saved = shopService.payOrder(id);
+        return mapToPresentationDto(saved);
     }
 
     @PostMapping("/orders/{id}/ship")
-    public OrderResponse shipOrder(@PathVariable Long id) {
-        OrderHeaderDto dto = shopService.shipOrder(id);
-        return mapToResponse(dto);
+    public OrderHeaderDto shipOrder(@PathVariable Long id) {
+        com.example.shop.application.OrderHeaderDto saved = shopService.shipOrder(id);
+        return mapToPresentationDto(saved);
     }
 
     @PostMapping("/orders/{id}/cancel")
-    public OrderResponse cancelOrder(@PathVariable Long id) {
-        OrderHeaderDto dto = shopService.cancelOrder(id);
-        return mapToResponse(dto);
+    public OrderHeaderDto cancelOrder(@PathVariable Long id) {
+        com.example.shop.application.OrderHeaderDto saved = shopService.cancelOrder(id);
+        return mapToPresentationDto(saved);
     }
 
     @GetMapping("/audit")
@@ -79,39 +84,10 @@ public class ShopController {
         return shopService.getAuditLogs();
     }
 
-    private CustomerResponse mapToResponse(CustomerDto dto) {
-        CustomerResponse response = new CustomerResponse();
-        response.id = dto.id;
-        response.name = dto.name;
-        response.loyaltyPoints = dto.loyaltyPoints;
-        return response;
-    }
-
-    private ProductResponse mapToResponse(ProductDto dto) {
-        ProductResponse response = new ProductResponse();
-        response.id = dto.id;
-        response.name = dto.name;
-        response.price = dto.price;
-        response.stock = dto.stock;
-        return response;
-    }
-
-    private OrderResponse mapToResponse(OrderHeaderDto dto) {
-        OrderResponse response = new OrderResponse();
-        response.id = dto.id;
-        response.customerId = dto.customerId;
-        response.status = dto.status;
-        response.total = dto.total;
-        if (dto.lines != null) {
-            response.lines = dto.lines.stream().map(line -> {
-                OrderLineResponse lr = new OrderLineResponse();
-                lr.id = line.id;
-                lr.productId = line.productId;
-                lr.quantity = line.quantity;
-                lr.linePrice = line.linePrice;
-                return lr;
-            }).collect(Collectors.toList());
-        }
-        return response;
+    private OrderHeaderDto mapToPresentationDto(com.example.shop.application.OrderHeaderDto appDto) {
+        List<OrderLineDto> lines = appDto.getLines().stream().map(line -> new OrderLineDto(
+            line.getId(), line.getProductId(), line.getQuantity(), line.getLinePrice()
+        )).collect(Collectors.toList());
+        return new OrderHeaderDto(appDto.getId(), appDto.getCustomerId(), appDto.getStatus(), appDto.getTotal(), lines);
     }
 }

@@ -4,93 +4,87 @@ import com.example.shop.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional
 public class ShopService {
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
-    private final AuditLog auditLog;
+    private final AuditPort auditPort;
 
     public ShopService(CustomerRepository customerRepository,
                        ProductRepository productRepository,
                        OrderRepository orderRepository,
-                       AuditLog auditLog) {
+                       AuditPort auditPort) {
         this.customerRepository = customerRepository;
         this.productRepository = productRepository;
         this.orderRepository = orderRepository;
-        this.auditLog = auditLog;
+        this.auditPort = auditPort;
     }
 
-    public CustomerDto createCustomer(String name) {
-        Customer customer = new Customer();
-        customer.setName(name);
-        customer.setLoyaltyPoints(0);
+    @Transactional
+    public CustomerDto createCustomer(CustomerDto dto) {
+        Customer customer = new Customer(null, dto.getName(), 0);
         Customer saved = customerRepository.save(customer);
-        return mapToDto(saved);
+        return new CustomerDto(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     public CustomerDto getCustomer(Long id) {
         Customer customer = customerRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("customer not found"));
-        return mapToDto(customer);
+                .orElseThrow(() -> new NoSuchElementException("customer not found"));
+        return new CustomerDto(customer.getId(), customer.getName(), customer.getLoyaltyPoints());
     }
 
-    public ProductDto createProduct(String name, double price, int stock) {
-        Product product = new Product();
-        product.setName(name);
-        product.setPrice(price);
-        product.setStock(stock);
+    @Transactional
+    public ProductDto createProduct(ProductDto dto) {
+        Product product = new Product(null, dto.getName(), dto.getPrice(), dto.getStock());
         Product saved = productRepository.save(product);
-        return mapToDto(saved);
+        return new ProductDto(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock());
     }
 
     public ProductDto getProduct(Long id) {
         Product product = productRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("product not found"));
-        return mapToDto(product);
+                .orElseThrow(() -> new NoSuchElementException("product not found"));
+        return new ProductDto(product.getId(), product.getName(), product.getPrice(), product.getStock());
     }
 
-    public OrderHeaderDto placeOrder(Long customerId, List<OrderLineInput> lineInputs) {
-        Customer customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new NotFoundException("customer not found"));
+    @Transactional
+    public OrderHeaderDto placeOrder(OrderHeaderDto dto) {
+        Customer customer = customerRepository.findById(dto.getCustomerId())
+                .orElseThrow(() -> new NoSuchElementException("customer not found"));
 
-        if (lineInputs == null || lineInputs.isEmpty()) {
-            throw new BadRequestException("order has no lines");
+        if (dto.getLines() == null || dto.getLines().isEmpty()) {
+            throw new IllegalArgumentException("order has no lines");
         }
 
         OrderHeader order = new OrderHeader();
-        order.setCustomerId(customerId);
+        order.setCustomerId(dto.getCustomerId());
         order.setStatus("NEW");
 
         double subtotal = 0;
-        for (OrderLineInput input : lineInputs) {
-            Product product = productRepository.findById(input.getProductId())
-                    .orElseThrow(() -> new NotFoundException("product not found"));
+        for (OrderLineDto lineDto : dto.getLines()) {
+            Product product = productRepository.findById(lineDto.getProductId())
+                    .orElseThrow(() -> new NoSuchElementException("product not found"));
 
-            if (input.getQuantity() <= 0) {
-                throw new BadRequestException("quantity must be positive");
+            if (lineDto.getQuantity() <= 0) {
+                throw new IllegalArgumentException("quantity must be positive");
             }
-            if (product.getStock() < input.getQuantity()) {
-                throw new BadRequestException("not enough stock");
+            if (product.getStock() < lineDto.getQuantity()) {
+                throw new IllegalArgumentException("not enough stock");
             }
 
-            double linePrice = product.getPrice() * input.getQuantity();
-            if (input.getQuantity() >= 10) {
+            double linePrice = product.getPrice() * lineDto.getQuantity();
+            if (lineDto.getQuantity() >= 10) {
                 linePrice = linePrice * 90 / 100;
             }
-
-            OrderLine line = new OrderLine();
-            line.setProductId(product.getId());
-            line.setQuantity(input.getQuantity());
-            line.setLinePrice(linePrice);
+            
+            OrderLine line = new OrderLine(null, lineDto.getProductId(), lineDto.getQuantity(), linePrice);
             order.getLines().add(line);
-
             subtotal += linePrice;
 
-            product.setStock(product.getStock() - input.getQuantity());
+            product.setStock(product.getStock() - lineDto.getQuantity());
             productRepository.save(product);
         }
 
@@ -100,109 +94,79 @@ public class ShopService {
         }
         order.setTotal(total);
 
-        OrderHeader savedOrder = orderRepository.save(order);
-        auditLog.record("created order " + savedOrder.getId());
-        return mapToDto(savedOrder);
+        OrderHeader saved = orderRepository.save(order);
+        auditPort.log("created order " + saved.getId());
+
+        return mapToOrderHeaderDto(saved);
     }
 
     public OrderHeaderDto getOrder(Long id) {
         OrderHeader order = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("order not found"));
-        return mapToDto(order);
+                .orElseThrow(() -> new NoSuchElementException("order not found"));
+        return mapToOrderHeaderDto(order);
     }
 
+    @Transactional
     public OrderHeaderDto payOrder(Long id) {
         OrderHeader order = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("order not found"));
-
+                .orElseThrow(() -> new NoSuchElementException("order not found"));
         if (!"NEW".equals(order.getStatus())) {
-            throw new BadRequestException("only NEW orders can be paid");
+            throw new IllegalArgumentException("only NEW orders can be paid");
         }
         order.setStatus("PAID");
 
         Customer customer = customerRepository.findById(order.getCustomerId())
-                .orElseThrow(() -> new NotFoundException("customer not found"));
+                .orElseThrow(() -> new NoSuchElementException("customer not found"));
         customer.setLoyaltyPoints(customer.getLoyaltyPoints() + (int) order.getTotal());
         customerRepository.save(customer);
 
-        OrderHeader savedOrder = orderRepository.save(order);
-        auditLog.record("paid order " + savedOrder.getId());
-        return mapToDto(savedOrder);
+        OrderHeader saved = orderRepository.save(order);
+        auditPort.log("paid order " + saved.getId());
+        return mapToOrderHeaderDto(saved);
     }
 
+    @Transactional
     public OrderHeaderDto shipOrder(Long id) {
         OrderHeader order = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("order not found"));
-
+                .orElseThrow(() -> new NoSuchElementException("order not found"));
         if (!"PAID".equals(order.getStatus())) {
-            throw new BadRequestException("only PAID orders can be shipped");
+            throw new IllegalArgumentException("only PAID orders can be shipped");
         }
         order.setStatus("SHIPPED");
-
-        OrderHeader savedOrder = orderRepository.save(order);
-        auditLog.record("shipped order " + savedOrder.getId());
-        return mapToDto(savedOrder);
+        OrderHeader saved = orderRepository.save(order);
+        auditPort.log("shipped order " + saved.getId());
+        return mapToOrderHeaderDto(saved);
     }
 
+    @Transactional
     public OrderHeaderDto cancelOrder(Long id) {
         OrderHeader order = orderRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("order not found"));
-
+                .orElseThrow(() -> new NoSuchElementException("order not found"));
         if ("SHIPPED".equals(order.getStatus()) || "CANCELLED".equals(order.getStatus())) {
-            throw new BadRequestException("cannot cancel a " + order.getStatus() + " order");
+            throw new IllegalArgumentException("cannot cancel a " + order.getStatus() + " order");
         }
 
         for (OrderLine line : order.getLines()) {
-            Product product = productRepository.findById(line.getProductId()).orElse(null);
-            if (product != null) {
+            productRepository.findById(line.getProductId()).ifPresent(product -> {
                 product.setStock(product.getStock() + line.getQuantity());
                 productRepository.save(product);
-            }
+            });
         }
-        order.setStatus("CANCELLED");
 
-        OrderHeader savedOrder = orderRepository.save(order);
-        auditLog.record("cancelled order " + savedOrder.getId());
-        return mapToDto(savedOrder);
+        order.setStatus("CANCELLED");
+        OrderHeader saved = orderRepository.save(order);
+        auditPort.log("cancelled order " + saved.getId());
+        return mapToOrderHeaderDto(saved);
     }
 
     public List<String> getAuditLogs() {
-        return auditLog.getLogs();
+        return auditPort.getLogs();
     }
 
-    private CustomerDto mapToDto(Customer customer) {
-        CustomerDto dto = new CustomerDto();
-        dto.id = customer.getId();
-        dto.name = customer.getName();
-        dto.loyaltyPoints = customer.getLoyaltyPoints();
-        return dto;
-    }
-
-    private ProductDto mapToDto(Product product) {
-        ProductDto dto = new ProductDto();
-        dto.id = product.getId();
-        dto.name = product.getName();
-        dto.price = product.getPrice();
-        dto.stock = product.getStock();
-        return dto;
-    }
-
-    private OrderHeaderDto mapToDto(OrderHeader order) {
-        OrderHeaderDto dto = new OrderHeaderDto();
-        dto.id = order.getId();
-        dto.customerId = order.getCustomerId();
-        dto.status = order.getStatus();
-        dto.total = order.getTotal();
-        if (order.getLines() != null) {
-            dto.lines = order.getLines().stream().map(line -> {
-                OrderLineDto ld = new OrderLineDto();
-                ld.id = line.getId();
-                ld.productId = line.getProductId();
-                ld.quantity = line.getQuantity();
-                ld.linePrice = line.getLinePrice();
-                return ld;
-            }).collect(Collectors.toList());
-        }
-        return dto;
+    private OrderHeaderDto mapToOrderHeaderDto(OrderHeader order) {
+        List<OrderLineDto> lineDtos = order.getLines().stream()
+                .map(line -> new OrderLineDto(line.getId(), line.getProductId(), line.getQuantity(), line.getLinePrice()))
+                .collect(Collectors.toList());
+        return new OrderHeaderDto(order.getId(), order.getCustomerId(), order.getStatus(), order.getTotal(), lineDtos);
     }
 }

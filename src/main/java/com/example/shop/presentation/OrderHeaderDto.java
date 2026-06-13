@@ -1,18 +1,18 @@
-package com.example.shop.domain;
+package com.example.shop.presentation;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class OrderHeader {
+public class OrderHeaderDto {
     private Long id;
     private Long customerId;
     private String status;
     private double total;
-    private List<OrderLine> lines = new ArrayList<>();
+    private List<OrderLineDto> lines = new ArrayList<>();
 
-    public OrderHeader() {}
+    public OrderHeaderDto() {}
 
-    public OrderHeader(Long id, Long customerId, String status, double total, List<OrderLine> lines) {
+    public OrderHeaderDto(Long id, Long customerId, String status, double total, List<OrderLineDto> lines) {
         this.id = id;
         this.customerId = customerId;
         this.status = status;
@@ -28,6 +28,6 @@ public class OrderHeader {
     public void setStatus(String status) { this.status = status; }
     public double getTotal() { return total; }
     public void setTotal(double total) { this.total = total; }
-    public List<OrderLine> getLines() { return lines; }
-    public void setLines(List<OrderLine> lines) { this.lines = lines; }
+    public List<OrderLineDto> getLines() { return lines; }
+    public void setLines(List<OrderLineDto> lines) { this.lines = lines; }
 }
