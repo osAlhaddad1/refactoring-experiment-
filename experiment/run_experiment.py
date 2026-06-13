@@ -25,7 +25,7 @@ import sys
 import time
 
 import github_ci as ci
-from ai_client import call_gemini, call_mock
+from ai_client import call_mock, call_openrouter
 from gate_runner import load_dotenv
 from prompts import APPROACH_NAMES, approach_by_name, build_prompt
 
@@ -33,7 +33,7 @@ from prompts import APPROACH_NAMES, approach_by_name, build_prompt
 
 RUNS_PER_CELL = 1               # repeats per (baseline x approach); raise to 5-10 later
 MAX_ITERS = 3                   # max loop iterations for loop approaches
-SECONDS_BETWEEN_AI_CALLS = 65   # the API allows ~1 request/minute
+SECONDS_BETWEEN_AI_CALLS = 0    # OpenRouter has generous limits; no throttle needed (raise if you hit 429s)
 
 # ---- fixed paths -----------------------------------------------------------
 
@@ -154,7 +154,7 @@ def call_ai(prompt, args):
         print("    (waiting %ds for the API rate limit)" % int(wait))
         time.sleep(wait)
     _last_ai_call_time = time.time()
-    return call_gemini(prompt)
+    return call_openrouter(prompt)
 
 
 # ---- one cell --------------------------------------------------------------
@@ -306,6 +306,7 @@ def main():
         with open(RESULTS_JSON, encoding="utf-8") as f:
             rows = json.load(f)
 
+    quota_failures = 0
     for name in args.approaches:
         approach = approach_by_name(name)
         for run_number in range(args.start_run, args.runs + 1):
@@ -313,9 +314,20 @@ def main():
             try:
                 rows.append(run_cell(baseline, approach, run_number, args))
                 write_results(rows)   # save after every cell so a long run never loses progress
+                quota_failures = 0
             except Exception as error:
+                message = str(error)
                 print("    !! cell failed (%s: %s); skipping. Re-run later with --approaches %s"
-                      % (error.__class__.__name__, error, name))
+                      % (error.__class__.__name__, message, name))
+                # If the API quota is exhausted (429), every cell will fail -- stop
+                # after two in a row instead of grinding through all of them.
+                if "429" in message or "Too Many Requests" in message or "RESOURCE_EXHAUSTED" in message:
+                    quota_failures += 1
+                    if quota_failures >= 2:
+                        print("    !! Two cells in a row hit the API quota (429). Stopping. "
+                              "Wait for the quota to reset (or enable billing), then re-run.")
+                        write_results(rows)
+                        return
 
     print()
     print("wrote %s and %s" % (RESULTS_CSV, RESULTS_JSON))
