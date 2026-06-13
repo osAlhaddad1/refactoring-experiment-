@@ -31,12 +31,20 @@ def call_gemini(prompt):
         "generationConfig": {"temperature": 0},
     }
 
-    # send the request; if we are rate-limited (HTTP 429), wait and retry
+    # send the request; retry on rate limits (429) and transient network errors
     attempt = 0
     while True:
         attempt = attempt + 1
         start = time.time()
-        response = requests.post(url, params={"key": api_key}, json=body, timeout=180)
+        try:
+            response = requests.post(url, params={"key": api_key}, json=body, timeout=300)
+        except requests.exceptions.RequestException as error:
+            if attempt <= 5:
+                print("    (network problem calling Gemini: %s; waiting 30s then retrying)"
+                      % error.__class__.__name__)
+                time.sleep(30)
+                continue
+            raise
         latency_ms = int((time.time() - start) * 1000)
         if response.status_code == 429 and attempt <= 5:
             print("    (API rate limit hit; waiting 60s then retrying)")
