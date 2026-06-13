@@ -1,0 +1,7 @@
+package com.example.shop.infrastructure;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+// Spring Data repository, correctly placed in infrastructure.
+public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long> {
+}

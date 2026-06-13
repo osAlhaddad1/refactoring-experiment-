@@ -9,3 +9,9 @@ target/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Experiment run outputs (regenerated on every run; remove these lines if you
+# want to track real results in git)
+experiment/results.csv
+experiment/results.json
+experiment/chart_*.png

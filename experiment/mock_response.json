@@ -1,0 +1,84 @@
+{
+  "files": [
+    {
+      "path": "src/main/java/com/example/shop/application/OrderService.java",
+      "content": "package com.example.shop.application;\n\nimport com.example.shop.domain.Order;\nimport com.example.shop.domain.OrderRepository;\nimport com.example.shop.domain.Pricing;\nimport com.example.shop.domain.Product;\nimport com.example.shop.domain.ProductRepository;\nimport org.springframework.stereotype.Service;\n\n@Service\npublic class OrderService {\n\n    private final ProductRepository products;\n    private final OrderRepository orders;\n    private final Pricing pricing = new Pricing();\n\n    public OrderService(ProductRepository products, OrderRepository orders) {\n        this.products = products;\n        this.orders = orders;\n    }\n\n    public OrderView place(Long productId, int quantity) {\n        Product product = products.findById(productId)\n                .orElseThrow(() -> new ShopException(\"product not found\"));\n        if (quantity <= 0) {\n            throw new ShopException(\"quantity must be positive\");\n        }\n        if (!product.hasStock(quantity)) {\n            throw new ShopException(\"not enough stock\");\n        }\n\n        double total = pricing.totalFor(product.price, quantity);\n        product.reduceStock(quantity);\n        products.save(product);\n\n        Order order = new Order();\n        order.productId = productId;\n        order.quantity = quantity;\n        order.total = total;\n        return toView(orders.save(order));\n    }\n\n    public OrderView get(Long id) {\n        Order order = orders.findById(id)\n                .orElseThrow(() -> new ShopException(\"order not found\"));\n        return toView(order);\n    }\n\n    private OrderView toView(Order order) {\n        OrderView view = new OrderView();\n        view.id = order.id;\n        view.productId = order.productId;\n        view.quantity = order.quantity;\n        view.total = order.total;\n        return view;\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/application/OrderView.java",
+      "content": "package com.example.shop.application;\n\npublic class OrderView {\n    public Long id;\n    public Long productId;\n    public int quantity;\n    public double total;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/application/ProductService.java",
+      "content": "package com.example.shop.application;\n\nimport com.example.shop.domain.Product;\nimport com.example.shop.domain.ProductRepository;\nimport org.springframework.stereotype.Service;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\n@Service\npublic class ProductService {\n\n    private final ProductRepository products;\n\n    public ProductService(ProductRepository products) {\n        this.products = products;\n    }\n\n    public ProductView create(String name, double price, int stock) {\n        Product product = new Product();\n        product.name = name;\n        product.price = price;\n        product.stock = stock;\n        return toView(products.save(product));\n    }\n\n    public ProductView get(Long id) {\n        Product product = products.findById(id)\n                .orElseThrow(() -> new ShopException(\"product not found\"));\n        return toView(product);\n    }\n\n    public List<ProductView> list() {\n        List<ProductView> views = new ArrayList<>();\n        for (Product product : products.findAll()) {\n            views.add(toView(product));\n        }\n        return views;\n    }\n\n    private ProductView toView(Product product) {\n        ProductView view = new ProductView();\n        view.id = product.id;\n        view.name = product.name;\n        view.price = product.price;\n        view.stock = product.stock;\n        return view;\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/application/ProductView.java",
+      "content": "package com.example.shop.application;\n\n// Application-level result carrier (so presentation never touches the domain).\npublic class ProductView {\n    public Long id;\n    public String name;\n    public double price;\n    public int stock;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/application/ShopException.java",
+      "content": "package com.example.shop.application;\n\n// Application error; the presentation layer maps it to HTTP 400.\npublic class ShopException extends RuntimeException {\n    public ShopException(String message) {\n        super(message);\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/domain/Order.java",
+      "content": "package com.example.shop.domain;\n\n// Pure domain entity.\npublic class Order {\n    public Long id;\n    public Long productId;\n    public int quantity;\n    public double total;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/domain/OrderRepository.java",
+      "content": "package com.example.shop.domain;\n\nimport java.util.Optional;\n\n// Repository PORT interface.\npublic interface OrderRepository {\n    Order save(Order order);\n    Optional<Order> findById(Long id);\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/domain/Pricing.java",
+      "content": "package com.example.shop.domain;\n\n// Pure business rule: bulk discount of 10% for 10 items or more.\npublic class Pricing {\n\n    public double totalFor(double price, int quantity) {\n        double total = price * quantity;\n        if (quantity >= 10) {\n            total = total * 0.9;\n        }\n        return total;\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/domain/Product.java",
+      "content": "package com.example.shop.domain;\n\n// Pure domain entity: no Spring, no JPA.\npublic class Product {\n    public Long id;\n    public String name;\n    public double price;\n    public int stock;\n\n    public boolean hasStock(int quantity) {\n        return stock >= quantity;\n    }\n\n    public void reduceStock(int quantity) {\n        stock = stock - quantity;\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/domain/ProductRepository.java",
+      "content": "package com.example.shop.domain;\n\nimport java.util.List;\nimport java.util.Optional;\n\n// Repository PORT interface. The JPA implementation lives in infrastructure.\npublic interface ProductRepository {\n    Product save(Product product);\n    Optional<Product> findById(Long id);\n    List<Product> findAll();\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/infrastructure/OrderEntity.java",
+      "content": "package com.example.shop.infrastructure;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.GeneratedValue;\nimport jakarta.persistence.GenerationType;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\n\n@Entity\n@Table(name = \"orders\")\npublic class OrderEntity {\n    @Id\n    @GeneratedValue(strategy = GenerationType.IDENTITY)\n    public Long id;\n    public Long productId;\n    public int quantity;\n    public double total;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/infrastructure/OrderJpaRepository.java",
+      "content": "package com.example.shop.infrastructure;\n\nimport org.springframework.data.jpa.repository.JpaRepository;\n\npublic interface OrderJpaRepository extends JpaRepository<OrderEntity, Long> {\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/infrastructure/OrderRepositoryAdapter.java",
+      "content": "package com.example.shop.infrastructure;\n\nimport com.example.shop.domain.Order;\nimport com.example.shop.domain.OrderRepository;\nimport org.springframework.stereotype.Component;\n\nimport java.util.Optional;\n\n@Component\npublic class OrderRepositoryAdapter implements OrderRepository {\n\n    private final OrderJpaRepository jpa;\n\n    public OrderRepositoryAdapter(OrderJpaRepository jpa) {\n        this.jpa = jpa;\n    }\n\n    public Order save(Order order) {\n        return toDomain(jpa.save(toEntity(order)));\n    }\n\n    public Optional<Order> findById(Long id) {\n        return jpa.findById(id).map(this::toDomain);\n    }\n\n    private OrderEntity toEntity(Order order) {\n        OrderEntity entity = new OrderEntity();\n        entity.id = order.id;\n        entity.productId = order.productId;\n        entity.quantity = order.quantity;\n        entity.total = order.total;\n        return entity;\n    }\n\n    private Order toDomain(OrderEntity entity) {\n        Order order = new Order();\n        order.id = entity.id;\n        order.productId = entity.productId;\n        order.quantity = entity.quantity;\n        order.total = entity.total;\n        return order;\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/infrastructure/ProductEntity.java",
+      "content": "package com.example.shop.infrastructure;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.GeneratedValue;\nimport jakarta.persistence.GenerationType;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\n\n@Entity\n@Table(name = \"products\")\npublic class ProductEntity {\n    @Id\n    @GeneratedValue(strategy = GenerationType.IDENTITY)\n    public Long id;\n    public String name;\n    public double price;\n    public int stock;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/infrastructure/ProductJpaRepository.java",
+      "content": "package com.example.shop.infrastructure;\n\nimport org.springframework.data.jpa.repository.JpaRepository;\n\n// Spring Data repository, correctly placed in infrastructure.\npublic interface ProductJpaRepository extends JpaRepository<ProductEntity, Long> {\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/infrastructure/ProductRepositoryAdapter.java",
+      "content": "package com.example.shop.infrastructure;\n\nimport com.example.shop.domain.Product;\nimport com.example.shop.domain.ProductRepository;\nimport org.springframework.stereotype.Component;\n\nimport java.util.ArrayList;\nimport java.util.List;\nimport java.util.Optional;\n\n// Adapter: implements the domain port using JPA, maps domain <-> JPA entity.\n@Component\npublic class ProductRepositoryAdapter implements ProductRepository {\n\n    private final ProductJpaRepository jpa;\n\n    public ProductRepositoryAdapter(ProductJpaRepository jpa) {\n        this.jpa = jpa;\n    }\n\n    public Product save(Product product) {\n        return toDomain(jpa.save(toEntity(product)));\n    }\n\n    public Optional<Product> findById(Long id) {\n        return jpa.findById(id).map(this::toDomain);\n    }\n\n    public List<Product> findAll() {\n        List<Product> result = new ArrayList<>();\n        for (ProductEntity entity : jpa.findAll()) {\n            result.add(toDomain(entity));\n        }\n        return result;\n    }\n\n    private ProductEntity toEntity(Product product) {\n        ProductEntity entity = new ProductEntity();\n        entity.id = product.id;\n        entity.name = product.name;\n        entity.price = product.price;\n        entity.stock = product.stock;\n        return entity;\n    }\n\n    private Product toDomain(ProductEntity entity) {\n        Product product = new Product();\n        product.id = entity.id;\n        product.name = entity.name;\n        product.price = entity.price;\n        product.stock = entity.stock;\n        return product;\n    }\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/presentation/OrderRequest.java",
+      "content": "package com.example.shop.presentation;\n\npublic class OrderRequest {\n    public Long productId;\n    public int quantity;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/presentation/ProductRequest.java",
+      "content": "package com.example.shop.presentation;\n\n// Request DTO that belongs to the presentation layer.\npublic class ProductRequest {\n    public String name;\n    public double price;\n    public int stock;\n}\n"
+    },
+    {
+      "path": "src/main/java/com/example/shop/presentation/ShopController.java",
+      "content": "package com.example.shop.presentation;\n\nimport com.example.shop.application.OrderService;\nimport com.example.shop.application.OrderView;\nimport com.example.shop.application.ProductService;\nimport com.example.shop.application.ProductView;\nimport com.example.shop.application.ShopException;\nimport org.springframework.http.ResponseEntity;\nimport org.springframework.web.bind.annotation.ExceptionHandler;\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.PathVariable;\nimport org.springframework.web.bind.annotation.PostMapping;\nimport org.springframework.web.bind.annotation.RequestBody;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.util.List;\n\n// Presentation: talks to application services only, returns its own view types.\n@RestController\npublic class ShopController {\n\n    private final ProductService productService;\n    private final OrderService orderService;\n\n    public ShopController(ProductService productService, OrderService orderService) {\n        this.productService = productService;\n        this.orderService = orderService;\n    }\n\n    @PostMapping(\"/products\")\n    public ProductView createProduct(@RequestBody ProductRequest request) {\n        return productService.create(request.name, request.price, request.stock);\n    }\n\n    @GetMapping(\"/products/{id}\")\n    public ProductView getProduct(@PathVariable Long id) {\n        return productService.get(id);\n    }\n\n    @GetMapping(\"/products\")\n    public List<ProductView> listProducts() {\n        return productService.list();\n    }\n\n    @PostMapping(\"/orders\")\n    public OrderView placeOrder(@RequestBody OrderRequest request) {\n        return orderService.place(request.productId, request.quantity);\n    }\n\n    @GetMapping(\"/orders/{id}\")\n    public OrderView getOrder(@PathVariable Long id) {\n        return orderService.get(id);\n    }\n\n    @ExceptionHandler(ShopException.class)\n    public ResponseEntity<String> handleShopError(ShopException e) {\n        return ResponseEntity.badRequest().body(e.getMessage());\n    }\n}\n"
+    }
+  ],
+  "deleted": [
+    "src/main/java/com/example/shop/ShopController.java"
+  ],
+  "notes": "Refactored the god-file into presentation/application/domain/infrastructure layers."
+}
