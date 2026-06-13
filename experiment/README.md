@@ -1,10 +1,26 @@
 # Experiment harness (Python)
 
 Plain Python 3. Standard library only, except `requests` for the real Gemini
-call. The Maven command is read from the `MVN_CMD` environment variable so no
-machine path is hard-coded.
+call. Configuration (`GEMINI_API_KEY`, `GEMINI_MODEL`, and optionally `MVN_CMD` /
+`JAVA_HOME`) is read from the environment, so no machine path or secret is
+hard-coded.
 
-Set these once per shell before running anything:
+### Configuration: a `.env` file (recommended)
+
+Copy `../.env.example` to `../.env` (at the repo root) and fill it in:
+
+```
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-2.0-flash
+MVN_CMD=C:\Users\osami\AppData\Local\thesis-build-tools\apache-maven-3.9.9\bin\mvn.cmd
+JAVA_HOME=C:\Users\osami\.jdks\corretto-23.0.2
+```
+
+`.env` is gitignored (never committed) and persists across branch checkouts.
+`run_experiment.py` and `validate_detector.py` read it automatically on start.
+Shell environment variables, if set, take precedence over `.env`.
+
+You can also just set them in the shell instead:
 
 ```powershell
 $env:JAVA_HOME = "C:\Users\osami\.jdks\corretto-23.0.2"
