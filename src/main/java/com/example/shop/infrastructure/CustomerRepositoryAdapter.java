@@ -3,30 +3,33 @@ package com.example.shop.infrastructure;
 import com.example.shop.domain.Customer;
 import com.example.shop.domain.CustomerRepository;
 import org.springframework.stereotype.Component;
+import java.util.Optional;
 
 @Component
 public class CustomerRepositoryAdapter implements CustomerRepository {
+    private final SpringDataCustomerRepository repository;
 
-    private final SpringCustomerRepository springRepository;
-
-    public CustomerRepositoryAdapter(SpringCustomerRepository springRepository) {
-        this.springRepository = springRepository;
+    public CustomerRepositoryAdapter(SpringDataCustomerRepository repository) {
+        this.repository = repository;
     }
 
     @Override
     public Customer save(Customer customer) {
-        CustomerEntity entity = new CustomerEntity();
-        entity.id = customer.id;
-        entity.name = customer.name;
-        entity.loyaltyPoints = customer.loyaltyPoints;
-        CustomerEntity saved = springRepository.save(entity);
-        return new Customer(saved.id, saved.name, saved.loyaltyPoints);
+        CustomerEntity entity;
+        if (customer.getId() != null) {
+            entity = repository.findById(customer.getId()).orElseGet(CustomerEntity::new);
+        } else {
+            entity = new CustomerEntity();
+        }
+        entity.setName(customer.getName());
+        entity.setLoyaltyPoints(customer.getLoyaltyPoints());
+        CustomerEntity saved = repository.save(entity);
+        customer.setId(saved.getId());
+        return customer;
     }
 
     @Override
-    public Customer findById(Long id) {
-        return springRepository.findById(id)
-                .map(entity -> new Customer(entity.id, entity.name, entity.loyaltyPoints))
-                .orElse(null);
+    public Optional<Customer> findById(Long id) {
+        return repository.findById(id).map(entity -> new Customer(entity.getId(), entity.getName(), entity.getLoyaltyPoints()));
     }
 }

@@ -1,11 +1,12 @@
 package com.example.shop.presentation;
 
 import com.example.shop.application.ShopService;
+import com.example.shop.application.dto.*;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 public class ShopController {
@@ -17,98 +18,93 @@ public class ShopController {
     }
 
     @PostMapping("/categories")
-    public CategoryDto createCategory(@RequestBody CategoryDto categoryDto) {
-        com.example.shop.application.CategoryDto appDto = new com.example.shop.application.CategoryDto();
-        appDto.name = categoryDto.name;
-        
-        com.example.shop.application.CategoryDto saved = shopService.createCategory(appDto);
-        return mapCategory(saved);
+    public CategoryResponse createCategory(@RequestBody CategoryRequest request) {
+        CategoryDto dto = new CategoryDto(null, request.getName());
+        CategoryDto saved = shopService.createCategory(dto);
+        return new CategoryResponse(saved.getId(), saved.getName());
     }
 
     @GetMapping("/categories/{id}")
-    public CategoryDto getCategory(@PathVariable Long id) {
-        return mapCategory(shopService.getCategory(id));
+    public CategoryResponse getCategory(@PathVariable Long id) {
+        CategoryDto saved = shopService.getCategory(id);
+        return new CategoryResponse(saved.getId(), saved.getName());
     }
 
     @PostMapping("/customers")
-    public CustomerDto createCustomer(@RequestBody CustomerDto customerDto) {
-        com.example.shop.application.CustomerDto appDto = new com.example.shop.application.CustomerDto();
-        appDto.name = customerDto.name;
-        
-        com.example.shop.application.CustomerDto saved = shopService.createCustomer(appDto);
-        return mapCustomer(saved);
+    public CustomerResponse createCustomer(@RequestBody CustomerRequest request) {
+        CustomerDto dto = new CustomerDto(null, request.getName(), 0);
+        CustomerDto saved = shopService.createCustomer(dto);
+        return new CustomerResponse(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     @GetMapping("/customers/{id}")
-    public CustomerDto getCustomer(@PathVariable Long id) {
-        return mapCustomer(shopService.getCustomer(id));
+    public CustomerResponse getCustomer(@PathVariable Long id) {
+        CustomerDto saved = shopService.getCustomer(id);
+        return new CustomerResponse(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     @PostMapping("/coupons")
-    public CouponDto createCoupon(@RequestBody CouponDto couponDto) {
-        com.example.shop.application.CouponDto appDto = new com.example.shop.application.CouponDto();
-        appDto.code = couponDto.code;
-        appDto.percent = couponDto.percent;
-        appDto.maxUses = couponDto.maxUses;
-        
-        com.example.shop.application.CouponDto saved = shopService.createCoupon(appDto);
-        return mapCoupon(saved);
+    public CouponResponse createCoupon(@RequestBody CouponRequest request) {
+        CouponDto dto = new CouponDto(request.getCode(), request.getPercent(), request.getMaxUses(), 0);
+        CouponDto saved = shopService.createCoupon(dto);
+        return new CouponResponse(saved.getCode(), saved.getPercent(), saved.getMaxUses(), saved.getTimesUsed());
     }
 
     @PostMapping("/products")
-    public ProductDto createProduct(@RequestBody Map<String, Object> body) {
-        String name = (String) body.get("name");
-        double price = ((Number) body.get("price")).doubleValue();
-        int stock = ((Number) body.get("stock")).intValue();
-        Object categoryIdObj = body.get("categoryId");
-        Long categoryId = categoryIdObj != null ? ((Number) categoryIdObj).longValue() : null;
-
-        com.example.shop.application.ProductDto saved = shopService.createProduct(name, price, stock, categoryId);
-        return mapProduct(saved);
+    public ProductResponse createProduct(@RequestBody ProductRequest request) {
+        ProductDto saved = shopService.createProduct(request.getName(), request.getPrice(), request.getStock(), request.getCategoryId());
+        CategoryResponse catResp = null;
+        if (saved.getCategory() != null) {
+            catResp = new CategoryResponse(saved.getCategory().getId(), saved.getCategory().getName());
+        }
+        return new ProductResponse(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock(), catResp);
     }
 
     @GetMapping("/products/{id}")
-    public ProductDto getProduct(@PathVariable Long id) {
-        return mapProduct(shopService.getProduct(id));
+    public ProductResponse getProduct(@PathVariable Long id) {
+        ProductDto saved = shopService.getProduct(id);
+        CategoryResponse catResp = null;
+        if (saved.getCategory() != null) {
+            catResp = new CategoryResponse(saved.getCategory().getId(), saved.getCategory().getName());
+        }
+        return new ProductResponse(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock(), catResp);
     }
 
     @PostMapping("/orders")
-    public OrderDto placeOrder(@RequestBody OrderDto orderDto) {
-        com.example.shop.application.OrderDto appDto = new com.example.shop.application.OrderDto();
-        appDto.customerId = orderDto.customerId;
-        appDto.couponCode = orderDto.couponCode;
-        appDto.lines = new ArrayList<>();
-        if (orderDto.lines != null) {
-            for (OrderLineDto line : orderDto.lines) {
-                com.example.shop.application.OrderLineDto appLine = new com.example.shop.application.OrderLineDto();
-                appLine.productId = line.productId;
-                appLine.quantity = line.quantity;
-                appDto.lines.add(appLine);
-            }
+    public OrderResponse placeOrder(@RequestBody OrderRequest request) {
+        List<OrderLineDto> lineDtos = List.of();
+        if (request.getLines() != null) {
+            lineDtos = request.getLines().stream()
+                    .map(line -> new OrderLineDto(null, line.getProductId(), line.getQuantity(), 0.0))
+                    .collect(Collectors.toList());
         }
-
-        com.example.shop.application.OrderDto saved = shopService.placeOrder(appDto);
+        OrderDto dto = new OrderDto(null, request.getCustomerId(), null, 0.0, 0.0, request.getCouponCode(), lineDtos);
+        OrderDto saved = shopService.placeOrder(dto);
         return mapOrder(saved);
     }
 
     @GetMapping("/orders/{id}")
-    public OrderDto getOrder(@PathVariable Long id) {
-        return mapOrder(shopService.getOrder(id));
+    public OrderResponse getOrder(@PathVariable Long id) {
+        OrderDto saved = shopService.getOrder(id);
+        return mapOrder(saved);
     }
 
     @PostMapping("/orders/{id}/pay")
-    public OrderDto payOrder(@PathVariable Long id) {
-        return mapOrder(shopService.payOrder(id));
+    public OrderResponse payOrder(@PathVariable Long id) {
+        OrderDto saved = shopService.payOrder(id);
+        return mapOrder(saved);
     }
 
     @PostMapping("/orders/{id}/ship")
-    public OrderDto shipOrder(@PathVariable Long id) {
-        return mapOrder(shopService.shipOrder(id));
+    public OrderResponse shipOrder(@PathVariable Long id) {
+        OrderDto saved = shopService.shipOrder(id);
+        return mapOrder(saved);
     }
 
     @PostMapping("/orders/{id}/cancel")
-    public OrderDto cancelOrder(@PathVariable Long id) {
-        return mapOrder(shopService.cancelOrder(id));
+    public OrderResponse cancelOrder(@PathVariable Long id) {
+        OrderDto saved = shopService.cancelOrder(id);
+        return mapOrder(saved);
     }
 
     @PostMapping("/orders/{id}/invoice")
@@ -126,64 +122,10 @@ public class ShopController {
         return shopService.getMetrics();
     }
 
-    private CategoryDto mapCategory(com.example.shop.application.CategoryDto appDto) {
-        if (appDto == null) return null;
-        CategoryDto dto = new CategoryDto();
-        dto.id = appDto.id;
-        dto.name = appDto.name;
-        return dto;
-    }
-
-    private CustomerDto mapCustomer(com.example.shop.application.CustomerDto appDto) {
-        if (appDto == null) return null;
-        CustomerDto dto = new CustomerDto();
-        dto.id = appDto.id;
-        dto.name = appDto.name;
-        dto.loyaltyPoints = appDto.loyaltyPoints;
-        return dto;
-    }
-
-    private CouponDto mapCoupon(com.example.shop.application.CouponDto appDto) {
-        if (appDto == null) return null;
-        CouponDto dto = new CouponDto();
-        dto.code = appDto.code;
-        dto.percent = appDto.percent;
-        dto.maxUses = appDto.maxUses;
-        dto.timesUsed = appDto.timesUsed;
-        return dto;
-    }
-
-    private ProductDto mapProduct(com.example.shop.application.ProductDto appDto) {
-        if (appDto == null) return null;
-        ProductDto dto = new ProductDto();
-        dto.id = appDto.id;
-        dto.name = appDto.name;
-        dto.price = appDto.price;
-        dto.stock = appDto.stock;
-        dto.category = mapCategory(appDto.category);
-        return dto;
-    }
-
-    private OrderDto mapOrder(com.example.shop.application.OrderDto appDto) {
-        if (appDto == null) return null;
-        OrderDto dto = new OrderDto();
-        dto.id = appDto.id;
-        dto.customerId = appDto.customerId;
-        dto.status = appDto.status;
-        dto.total = appDto.total;
-        dto.surcharge = appDto.surcharge;
-        dto.couponCode = appDto.couponCode;
-        dto.lines = new ArrayList<>();
-        if (appDto.lines != null) {
-            for (com.example.shop.application.OrderLineDto appLine : appDto.lines) {
-                OrderLineDto lineDto = new OrderLineDto();
-                lineDto.id = appLine.id;
-                lineDto.productId = appLine.productId;
-                lineDto.quantity = appLine.quantity;
-                lineDto.linePrice = appLine.linePrice;
-                dto.lines.add(lineDto);
-            }
-        }
-        return dto;
+    private OrderResponse mapOrder(OrderDto order) {
+        List<OrderLineResponse> lines = order.getLines().stream()
+                .map(line -> new OrderLineResponse(line.getId(), line.getProductId(), line.getQuantity(), line.getLinePrice()))
+                .collect(Collectors.toList());
+        return new OrderResponse(order.getId(), order.getCustomerId(), order.getStatus(), order.getTotal(), order.getSurcharge(), order.getCouponCode(), lines);
     }
 }

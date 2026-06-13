@@ -1,26 +1,20 @@
-package com.example.shop.domain;
+package com.example.shop.application.dto;
 
-public class Customer {
+public class CustomerDto {
     private Long id;
     private String name;
     private int loyaltyPoints;
 
-    public Customer() {}
-
-    public Customer(Long id, String name, int loyaltyPoints) {
+    public CustomerDto() {}
+    public CustomerDto(Long id, String name, int loyaltyPoints) {
         this.id = id;
         this.name = name;
         this.loyaltyPoints = loyaltyPoints;
     }
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public int getLoyaltyPoints() { return loyaltyPoints; }
     public void setLoyaltyPoints(int loyaltyPoints) { this.loyaltyPoints = loyaltyPoints; }
-
-    public void addLoyaltyPoints(int points) {
-        this.loyaltyPoints += points;
-    }
 }

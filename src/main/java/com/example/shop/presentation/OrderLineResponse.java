@@ -1,19 +1,18 @@
-package com.example.shop.infrastructure;
+package com.example.shop.presentation;
 
-import jakarta.persistence.*;
-
-@Entity
-@Table(name = "order_lines")
-public class OrderLineEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+public class OrderLineResponse {
     private Long id;
     private Long productId;
     private int quantity;
     private double linePrice;
 
-    public OrderLineEntity() {}
-
+    public OrderLineResponse() {}
+    public OrderLineResponse(Long id, Long productId, int quantity, double linePrice) {
+        this.id = id;
+        this.productId = productId;
+        this.quantity = quantity;
+        this.linePrice = linePrice;
+    }
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getProductId() { return productId; }

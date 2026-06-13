@@ -4,47 +4,48 @@ import com.example.shop.domain.Category;
 import com.example.shop.domain.Product;
 import com.example.shop.domain.ProductRepository;
 import org.springframework.stereotype.Component;
+import java.util.Optional;
 
 @Component
 public class ProductRepositoryAdapter implements ProductRepository {
+    private final SpringDataProductRepository repository;
 
-    private final SpringProductRepository springRepository;
-
-    public ProductRepositoryAdapter(SpringProductRepository springRepository) {
-        this.springRepository = springRepository;
+    public ProductRepositoryAdapter(SpringDataProductRepository repository) {
+        this.repository = repository;
     }
 
     @Override
     public Product save(Product product) {
-        ProductEntity entity = new ProductEntity();
-        entity.id = product.id;
-        entity.name = product.name;
-        entity.price = product.price;
-        entity.stock = product.stock;
-        if (product.category != null) {
+        ProductEntity entity;
+        if (product.getId() != null) {
+            entity = repository.findById(product.getId()).orElseGet(ProductEntity::new);
+        } else {
+            entity = new ProductEntity();
+        }
+        entity.setName(product.getName());
+        entity.setPrice(product.getPrice());
+        entity.setStock(product.getStock());
+        if (product.getCategory() != null) {
             CategoryEntity catEntity = new CategoryEntity();
-            catEntity.id = product.category.id;
-            catEntity.name = product.category.name;
-            entity.category = catEntity;
+            catEntity.setId(product.getCategory().getId());
+            catEntity.setName(product.getCategory().getName());
+            entity.setCategory(catEntity);
+        } else {
+            entity.setCategory(null);
         }
-        ProductEntity saved = springRepository.save(entity);
-        Category category = null;
-        if (saved.category != null) {
-            category = new Category(saved.category.id, saved.category.name);
-        }
-        return new Product(saved.id, saved.name, saved.price, saved.stock, category);
+        ProductEntity saved = repository.save(entity);
+        product.setId(saved.getId());
+        return product;
     }
 
     @Override
-    public Product findById(Long id) {
-        return springRepository.findById(id)
-                .map(entity -> {
-                    Category category = null;
-                    if (entity.category != null) {
-                        category = new Category(entity.category.id, entity.category.name);
-                    }
-                    return new Product(entity.id, entity.name, entity.price, entity.stock, category);
-                })
-                .orElse(null);
+    public Optional<Product> findById(Long id) {
+        return repository.findById(id).map(entity -> {
+            Category category = null;
+            if (entity.getCategory() != null) {
+                category = new Category(entity.getCategory().getId(), entity.getCategory().getName());
+            }
+            return new Product(entity.getId(), entity.getName(), entity.getPrice(), entity.getStock(), category);
+        });
     }
 }

@@ -1,18 +1,18 @@
-package com.example.shop.infrastructure;
+package com.example.shop.application.dto;
 
-import jakarta.persistence.*;
-
-@Entity
-@Table(name = "coupons")
-public class CouponEntity {
-    @Id
+public class CouponDto {
     private String code;
     private int percent;
     private int maxUses;
     private int timesUsed;
 
-    public CouponEntity() {}
-
+    public CouponDto() {}
+    public CouponDto(String code, int percent, int maxUses, int timesUsed) {
+        this.code = code;
+        this.percent = percent;
+        this.maxUses = maxUses;
+        this.timesUsed = timesUsed;
+    }
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
     public int getPercent() { return percent; }

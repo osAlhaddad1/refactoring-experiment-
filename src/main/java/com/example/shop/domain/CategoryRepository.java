@@ -1,6 +1,8 @@
 package com.example.shop.domain;
 
+import java.util.Optional;
+
 public interface CategoryRepository {
     Category save(Category category);
-    Category findById(Long id);
+    Optional<Category> findById(Long id);
 }

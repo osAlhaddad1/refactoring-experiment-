@@ -7,7 +7,16 @@ import jakarta.persistence.*;
 public class CustomerEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    public Long id;
-    public String name;
-    public int loyaltyPoints;
+    private Long id;
+    private String name;
+    private int loyaltyPoints;
+
+    public CustomerEntity() {}
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+    public int getLoyaltyPoints() { return loyaltyPoints; }
+    public void setLoyaltyPoints(int loyaltyPoints) { this.loyaltyPoints = loyaltyPoints; }
 }

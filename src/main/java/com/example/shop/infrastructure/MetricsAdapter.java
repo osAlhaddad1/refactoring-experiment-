@@ -1,0 +1,21 @@
+package com.example.shop.infrastructure;
+
+import com.example.shop.domain.MetricsPort;
+import org.springframework.stereotype.Component;
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class MetricsAdapter implements MetricsPort {
+    private static final Map<String, Integer> METRICS = new HashMap<>();
+
+    @Override
+    public synchronized void bump(String metric) {
+        METRICS.put(metric, METRICS.getOrDefault(metric, 0) + 1);
+    }
+
+    @Override
+    public synchronized Map<String, Integer> getMetrics() {
+        return new HashMap<>(METRICS);
+    }
+}

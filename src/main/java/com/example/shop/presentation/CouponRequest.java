@@ -1,17 +1,9 @@
-package com.example.shop.infrastructure;
+package com.example.shop.presentation;
 
-import jakarta.persistence.*;
-
-@Entity
-@Table(name = "coupons")
-public class CouponEntity {
-    @Id
+public class CouponRequest {
     private String code;
     private int percent;
     private int maxUses;
-    private int timesUsed;
-
-    public CouponEntity() {}
 
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
@@ -19,6 +11,4 @@ public class CouponEntity {
     public void setPercent(int percent) { this.percent = percent; }
     public int getMaxUses() { return maxUses; }
     public void setMaxUses(int maxUses) { this.maxUses = maxUses; }
-    public int getTimesUsed() { return timesUsed; }
-    public void setTimesUsed(int timesUsed) { this.timesUsed = timesUsed; }
 }

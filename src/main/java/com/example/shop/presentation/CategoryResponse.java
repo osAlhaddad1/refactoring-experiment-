@@ -1,17 +1,14 @@
-package com.example.shop.infrastructure;
+package com.example.shop.presentation;
 
-import jakarta.persistence.*;
-
-@Entity
-@Table(name = "categories")
-public class CategoryEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+public class CategoryResponse {
     private Long id;
     private String name;
 
-    public CategoryEntity() {}
-
+    public CategoryResponse() {}
+    public CategoryResponse(Long id, String name) {
+        this.id = id;
+        this.name = name;
+    }
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getName() { return name; }

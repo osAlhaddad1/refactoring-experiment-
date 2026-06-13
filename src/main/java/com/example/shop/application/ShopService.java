@@ -1,5 +1,7 @@
 package com.example.shop.application;
 
+import com.example.shop.application.dto.*;
+import com.example.shop.application.exception.NotFoundException;
 import com.example.shop.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -8,9 +10,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
-@Transactional
 public class ShopService {
 
     private final CategoryRepository categoryRepository;
@@ -18,183 +20,116 @@ public class ShopService {
     private final CouponRepository couponRepository;
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
-    private final SystemStatePort systemStatePort;
+    private final AuditPort auditPort;
+    private final MetricsPort metricsPort;
+    private final InvoiceCounterPort invoiceCounterPort;
 
     public ShopService(CategoryRepository categoryRepository,
                        CustomerRepository customerRepository,
                        CouponRepository couponRepository,
                        ProductRepository productRepository,
                        OrderRepository orderRepository,
-                       SystemStatePort systemStatePort) {
+                       AuditPort auditPort,
+                       MetricsPort metricsPort,
+                       InvoiceCounterPort invoiceCounterPort) {
         this.categoryRepository = categoryRepository;
         this.customerRepository = customerRepository;
         this.couponRepository = couponRepository;
         this.productRepository = productRepository;
         this.orderRepository = orderRepository;
-        this.systemStatePort = systemStatePort;
+        this.auditPort = auditPort;
+        this.metricsPort = metricsPort;
+        this.invoiceCounterPort = invoiceCounterPort;
     }
 
-    public CategoryDto createCategory(CategoryDto categoryDto) {
-        Category category = mapCategory(categoryDto);
-        category.id = null;
+    @Transactional
+    public CategoryDto createCategory(CategoryDto dto) {
+        Category category = new Category(null, dto.getName());
         Category saved = categoryRepository.save(category);
-        return mapCategory(saved);
+        return new CategoryDto(saved.getId(), saved.getName());
     }
 
     public CategoryDto getCategory(Long id) {
-        Category category = categoryRepository.findById(id);
-        if (category == null) {
-            throw new NotFoundException("category not found");
-        }
-        return mapCategory(category);
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("category"));
+        return new CategoryDto(category.getId(), category.getName());
     }
 
-    public CustomerDto createCustomer(CustomerDto customerDto) {
-        Customer customer = mapCustomer(customerDto);
-        customer.id = null;
-        customer.loyaltyPoints = 0;
+    @Transactional
+    public CustomerDto createCustomer(CustomerDto dto) {
+        Customer customer = new Customer(null, dto.getName(), 0);
         Customer saved = customerRepository.save(customer);
-        return mapCustomer(saved);
+        return new CustomerDto(saved.getId(), saved.getName(), saved.getLoyaltyPoints());
     }
 
     public CustomerDto getCustomer(Long id) {
-        Customer customer = customerRepository.findById(id);
-        if (customer == null) {
-            throw new NotFoundException("customer not found");
-        }
-        return mapCustomer(customer);
+        Customer customer = customerRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("customer"));
+        return new CustomerDto(customer.getId(), customer.getName(), customer.getLoyaltyPoints());
     }
 
-    public CouponDto createCoupon(CouponDto couponDto) {
-        Coupon coupon = mapCoupon(couponDto);
-        coupon.timesUsed = 0;
+    @Transactional
+    public CouponDto createCoupon(CouponDto dto) {
+        Coupon coupon = new Coupon(dto.getCode(), dto.getPercent(), dto.getMaxUses(), 0);
         Coupon saved = couponRepository.save(coupon);
-        return mapCoupon(saved);
+        return new CouponDto(saved.getCode(), saved.getPercent(), saved.getMaxUses(), saved.getTimesUsed());
     }
 
+    @Transactional
     public ProductDto createProduct(String name, double price, int stock, Long categoryId) {
         Product product = new Product();
-        product.name = name;
-        product.price = price;
-        product.stock = stock;
+        product.setName(name);
+        product.setPrice(price);
+        product.setStock(stock);
         if (categoryId != null) {
-            Category category = categoryRepository.findById(categoryId);
-            if (category == null) {
-                throw new NotFoundException("category not found");
-            }
-            product.category = category;
+            Category category = categoryRepository.findById(categoryId)
+                    .orElseThrow(() -> new NotFoundException("category"));
+            product.setCategory(category);
         }
         Product saved = productRepository.save(product);
-        return mapProduct(saved);
+        CategoryDto catDto = null;
+        if (saved.getCategory() != null) {
+            catDto = new CategoryDto(saved.getCategory().getId(), saved.getCategory().getName());
+        }
+        return new ProductDto(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock(), catDto);
     }
 
     public ProductDto getProduct(Long id) {
-        Product product = productRepository.findById(id);
-        if (product == null) {
-            throw new NotFoundException("product not found");
+        Product saved = productRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("product"));
+        CategoryDto catDto = null;
+        if (saved.getCategory() != null) {
+            catDto = new CategoryDto(saved.getCategory().getId(), saved.getCategory().getName());
         }
-        return mapProduct(product);
+        return new ProductDto(saved.getId(), saved.getName(), saved.getPrice(), saved.getStock(), catDto);
     }
 
-    public OrderDto placeOrder(OrderDto orderDto) {
-        OrderHeader order = new OrderHeader();
-        order.customerId = orderDto.customerId;
-        order.couponCode = orderDto.couponCode;
-        order.lines = new ArrayList<>();
-        if (orderDto.lines != null) {
-            for (OrderLineDto lineDto : orderDto.lines) {
-                OrderLine line = new OrderLine();
-                line.productId = lineDto.productId;
-                line.quantity = lineDto.quantity;
-                order.lines.add(line);
-            }
+    @Transactional
+    public OrderDto placeOrder(OrderDto dto) {
+        Customer customer = customerRepository.findById(dto.getCustomerId())
+                .orElseThrow(() -> new NotFoundException("customer"));
+        if (dto.getLines() == null || dto.getLines().isEmpty()) {
+            throw new IllegalArgumentException("order has no lines");
         }
 
-        OrderHeader saved = placeOrderEntity(order);
-        return mapOrder(saved);
-    }
-
-    public OrderDto getOrder(Long id) {
-        OrderHeader order = orderRepository.findById(id);
-        if (order == null) {
-            throw new NotFoundException("order not found");
-        }
-        return mapOrder(order);
-    }
-
-    public OrderDto payOrder(Long id) {
-        OrderHeader order = payOrderEntity(id);
-        return mapOrder(order);
-    }
-
-    public OrderDto shipOrder(Long id) {
-        OrderHeader order = shipOrderEntity(id);
-        return mapOrder(order);
-    }
-
-    public OrderDto cancelOrder(Long id) {
-        OrderHeader order = cancelOrderEntity(id);
-        return mapOrder(order);
-    }
-
-    public Map<String, Object> invoiceOrder(Long id) {
-        OrderHeader order = orderRepository.findById(id);
-        if (order == null) {
-            throw new NotFoundException("order not found");
-        }
-        if (!"PAID".equals(order.status) && !"SHIPPED".equals(order.status)) {
-            throw new BadRequestException("only paid orders can be invoiced");
-        }
-        long number = systemStatePort.nextInvoiceNumber();
-        systemStatePort.incrementMetric("invoicesIssued");
-        systemStatePort.addAuditLog("invoiced order " + order.id);
-
-        Map<String, Object> invoice = new LinkedHashMap<>();
-        invoice.put("invoiceNumber", number);
-        invoice.put("orderId", order.id);
-        invoice.put("total", order.total);
-        invoice.put("surcharge", order.surcharge);
-        invoice.put("amountDue", order.total + order.surcharge);
-        return invoice;
-    }
-
-    public List<String> getAuditLogs() {
-        return systemStatePort.getAuditLogs();
-    }
-
-    public Map<String, Integer> getMetrics() {
-        return systemStatePort.getMetrics();
-    }
-
-    private OrderHeader placeOrderEntity(OrderHeader order) {
-        Customer customer = customerRepository.findById(order.customerId);
-        if (customer == null) {
-            throw new NotFoundException("customer not found");
-        }
-        if (order.lines == null || order.lines.isEmpty()) {
-            throw new BadRequestException("order has no lines");
-        }
-
+        List<OrderLine> domainLines = new ArrayList<>();
         double subtotal = 0;
-        for (OrderLine line : order.lines) {
-            Product product = productRepository.findById(line.productId);
-            if (product == null) {
-                throw new NotFoundException("product not found");
+        for (OrderLineDto lineDto : dto.getLines()) {
+            Product product = productRepository.findById(lineDto.getProductId())
+                    .orElseThrow(() -> new NotFoundException("product"));
+            if (lineDto.getQuantity() <= 0) {
+                throw new IllegalArgumentException("quantity must be positive");
             }
-            if (line.quantity <= 0) {
-                throw new BadRequestException("quantity must be positive");
-            }
-            if (product.stock < line.quantity) {
-                throw new BadRequestException("not enough stock");
-            }
+            product.decreaseStock(lineDto.getQuantity());
 
-            double linePrice = product.price * line.quantity;
-            if (line.quantity >= 10) {
+            double linePrice = product.getPrice() * lineDto.getQuantity();
+            if (lineDto.getQuantity() >= 10) {
                 linePrice = linePrice * 90 / 100;
             }
-            line.linePrice = linePrice;
-            subtotal = subtotal + linePrice;
-            product.stock = product.stock - line.quantity;
+            
+            OrderLine line = new OrderLine(null, lineDto.getProductId(), lineDto.getQuantity(), linePrice);
+            domainLines.add(line);
+            subtotal += linePrice;
             productRepository.save(product);
         }
 
@@ -203,176 +138,119 @@ public class ShopService {
             total = total * 95 / 100;
         }
 
-        if (order.couponCode != null && !order.couponCode.isEmpty()) {
-            Coupon coupon = couponRepository.findByCode(order.couponCode);
-            if (coupon == null) {
-                throw new BadRequestException("unknown coupon");
+        if (dto.getCouponCode() != null && !dto.getCouponCode().isEmpty()) {
+            Coupon coupon = couponRepository.findByCode(dto.getCouponCode())
+                    .orElseThrow(() -> new IllegalArgumentException("unknown coupon"));
+            if (coupon.isUsedUp()) {
+                throw new IllegalArgumentException("coupon has been used up");
             }
-            if (coupon.timesUsed >= coupon.maxUses) {
-                throw new BadRequestException("coupon has been used up");
-            }
-            total = total * (100 - coupon.percent) / 100;
-            coupon.timesUsed = coupon.timesUsed + 1;
+            total = total * (100 - coupon.getPercent()) / 100;
+            coupon.incrementTimesUsed();
             couponRepository.save(coupon);
         }
 
-        order.id = null;
-        order.status = "NEW";
-        order.total = total;
-        order.surcharge = 0;
-        OrderHeader savedOrder = orderRepository.save(order);
+        Order order = new Order(null, dto.getCustomerId(), "NEW", total, 0.0, dto.getCouponCode(), domainLines);
+        Order saved = orderRepository.save(order);
 
-        systemStatePort.incrementMetric("ordersCreated");
-        systemStatePort.addAuditLog("created order " + savedOrder.id);
-
-        return savedOrder;
+        metricsPort.bump("ordersCreated");
+        auditPort.log("created order " + saved.getId());
+        return mapToDto(saved);
     }
 
-    private OrderHeader payOrderEntity(Long id) {
-        OrderHeader order = orderRepository.findById(id);
-        if (order == null) {
-            throw new NotFoundException("order not found");
+    public OrderDto getOrder(Long id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("order"));
+        return mapToDto(order);
+    }
+
+    @Transactional
+    public OrderDto payOrder(Long id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("order"));
+        if (!"NEW".equals(order.getStatus())) {
+            throw new IllegalArgumentException("only NEW orders can be paid");
         }
-        if (!"NEW".equals(order.status)) {
-            throw new BadRequestException("only NEW orders can be paid");
-        }
-        order.status = "PAID";
-        order.surcharge = 5.0;
-        Customer customer = customerRepository.findById(order.customerId);
-        customer.loyaltyPoints = customer.loyaltyPoints + (int) order.total;
+        order.setStatus("PAID");
+        order.setSurcharge(5.0);
+        Customer customer = customerRepository.findById(order.getCustomerId())
+                .orElseThrow(() -> new NotFoundException("customer"));
+        customer.addLoyaltyPoints((int) order.getTotal());
         customerRepository.save(customer);
-        OrderHeader savedOrder = orderRepository.save(order);
+        Order saved = orderRepository.save(order);
 
-        systemStatePort.incrementMetric("ordersPaid");
-        systemStatePort.addAuditLog("paid order " + order.id);
-        return savedOrder;
+        metricsPort.bump("ordersPaid");
+        auditPort.log("paid order " + saved.getId());
+        return mapToDto(saved);
     }
 
-    private OrderHeader shipOrderEntity(Long id) {
-        OrderHeader order = orderRepository.findById(id);
-        if (order == null) {
-            throw new NotFoundException("order not found");
+    @Transactional
+    public OrderDto shipOrder(Long id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("order"));
+        if (!"PAID".equals(order.getStatus())) {
+            throw new IllegalArgumentException("only PAID orders can be shipped");
         }
-        if (!"PAID".equals(order.status)) {
-            throw new BadRequestException("only PAID orders can be shipped");
-        }
-        order.status = "SHIPPED";
-        OrderHeader savedOrder = orderRepository.save(order);
+        order.setStatus("SHIPPED");
+        Order saved = orderRepository.save(order);
 
-        systemStatePort.incrementMetric("ordersShipped");
-        systemStatePort.addAuditLog("shipped order " + order.id);
-        return savedOrder;
+        metricsPort.bump("ordersShipped");
+        auditPort.log("shipped order " + saved.getId());
+        return mapToDto(saved);
     }
 
-    private OrderHeader cancelOrderEntity(Long id) {
-        OrderHeader order = orderRepository.findById(id);
-        if (order == null) {
-            throw new NotFoundException("order not found");
+    @Transactional
+    public OrderDto cancelOrder(Long id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("order"));
+        if ("SHIPPED".equals(order.getStatus()) || "CANCELLED".equals(order.getStatus())) {
+            throw new IllegalArgumentException("cannot cancel a " + order.getStatus() + " order");
         }
-        if ("SHIPPED".equals(order.status) || "CANCELLED".equals(order.status)) {
-            throw new BadRequestException("cannot cancel a " + order.status + " order");
-        }
-
-        for (OrderLine line : order.lines) {
-            Product product = productRepository.findById(line.productId);
-            if (product != null) {
-                product.stock = product.stock + line.quantity;
+        for (OrderLine line : order.getLines()) {
+            productRepository.findById(line.getProductId()).ifPresent(product -> {
+                product.increaseStock(line.getQuantity());
                 productRepository.save(product);
-            } 
+            });
         }
-        order.status = "CANCELLED";
-        OrderHeader savedOrder = orderRepository.save(order);
+        order.setStatus("CANCELLED");
+        Order saved = orderRepository.save(order);
 
-        systemStatePort.incrementMetric("ordersCancelled");
-        systemStatePort.addAuditLog("cancelled order " + order.id);
-        return savedOrder;
+        metricsPort.bump("ordersCancelled");
+        auditPort.log("cancelled order " + saved.getId());
+        return mapToDto(saved);
     }
 
-    private Category mapCategory(CategoryDto dto) {
-        if (dto == null) return null;
-        Category category = new Category();
-        category.id = dto.id;
-        category.name = dto.name;
-        return category;
-    }
-
-    private CategoryDto mapCategory(Category category) {
-        if (category == null) return null;
-        CategoryDto dto = new CategoryDto();
-        dto.id = category.id;
-        dto.name = category.name;
-        return dto;
-    }
-
-    private Customer mapCustomer(CustomerDto dto) {
-        if (dto == null) return null;
-        Customer customer = new Customer();
-        customer.id = dto.id;
-        customer.name = dto.name;
-        customer.loyaltyPoints = dto.loyaltyPoints;
-        return customer;
-    }
-
-    private CustomerDto mapCustomer(Customer customer) {
-        if (customer == null) return null;
-        CustomerDto dto = new CustomerDto();
-        dto.id = customer.id;
-        dto.name = customer.name;
-        dto.loyaltyPoints = customer.loyaltyPoints;
-        return dto;
-    }
-
-    private Coupon mapCoupon(CouponDto dto) {
-        if (dto == null) return null;
-        Coupon coupon = new Coupon();
-        coupon.code = dto.code;
-        coupon.percent = dto.percent;
-        coupon.maxUses = dto.maxUses;
-        coupon.timesUsed = dto.timesUsed;
-        return coupon;
-    }
-
-    private CouponDto mapCoupon(Coupon coupon) {
-        if (coupon == null) return null;
-        CouponDto dto = new CouponDto();
-        dto.code = coupon.code;
-        dto.percent = coupon.percent;
-        dto.maxUses = coupon.maxUses;
-        dto.timesUsed = coupon.timesUsed;
-        return dto;
-    }
-
-    private ProductDto mapProduct(Product product) {
-        if (product == null) return null;
-        ProductDto dto = new ProductDto();
-        dto.id = product.id;
-        dto.name = product.name;
-        dto.price = product.price;
-        dto.stock = product.stock;
-        dto.category = mapCategory(product.category);
-        return dto;
-    }
-
-    private OrderDto mapOrder(OrderHeader order) {
-        if (order == null) return null;
-        OrderDto dto = new OrderDto();
-        dto.id = order.id;
-        dto.customerId = order.customerId;
-        dto.status = order.status;
-        dto.total = order.total;
-        dto.surcharge = order.surcharge;
-        dto.couponCode = order.couponCode;
-        dto.lines = new ArrayList<>();
-        if (order.lines != null) {
-            for (OrderLine line : order.lines) {
-                OrderLineDto lineDto = new OrderLineDto();
-                lineDto.id = line.id;
-                lineDto.productId = line.productId;
-                lineDto.quantity = line.quantity;
-                lineDto.linePrice = line.linePrice;
-                dto.lines.add(lineDto);
-            }
+    @Transactional
+    public Map<String, Object> invoiceOrder(Long id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("order"));
+        if (!"PAID".equals(order.getStatus()) && !"SHIPPED".equals(order.getStatus())) {
+            throw new IllegalArgumentException("only paid orders can be invoiced");
         }
-        return dto;
+        long number = invoiceCounterPort.incrementAndGet();
+        metricsPort.bump("invoicesIssued");
+        auditPort.log("invoiced order " + order.getId());
+
+        Map<String, Object> invoice = new LinkedHashMap<>();
+        invoice.put("invoiceNumber", number);
+        invoice.put("orderId", order.getId());
+        invoice.put("total", order.getTotal());
+        invoice.put("surcharge", order.getSurcharge());
+        invoice.put("amountDue", order.getTotal() + order.getSurcharge());
+        return invoice;
+    }
+
+    public List<String> getAuditLogs() {
+        return auditPort.getLogs();
+    }
+
+    public Map<String, Integer> getMetrics() {
+        return metricsPort.getMetrics();
+    }
+
+    private OrderDto mapToDto(Order order) {
+        List<OrderLineDto> lines = order.getLines().stream()
+                .map(line -> new OrderLineDto(line.getId(), line.getProductId(), line.getQuantity(), line.getLinePrice()))
+                .collect(Collectors.toList());
+        return new OrderDto(order.getId(), order.getCustomerId(), order.getStatus(), order.getTotal(), order.getSurcharge(), order.getCouponCode(), lines);
     }
 }

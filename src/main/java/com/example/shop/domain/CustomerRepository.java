@@ -1,6 +1,8 @@
 package com.example.shop.domain;
 
+import java.util.Optional;
+
 public interface CustomerRepository {
     Customer save(Customer customer);
-    Customer findById(Long id);
+    Optional<Customer> findById(Long id);
 }
