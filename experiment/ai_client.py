@@ -31,9 +31,18 @@ def call_gemini(prompt):
         "generationConfig": {"temperature": 0},
     }
 
-    start = time.time()
-    response = requests.post(url, params={"key": api_key}, json=body, timeout=180)
-    latency_ms = int((time.time() - start) * 1000)
+    # send the request; if we are rate-limited (HTTP 429), wait and retry
+    attempt = 0
+    while True:
+        attempt = attempt + 1
+        start = time.time()
+        response = requests.post(url, params={"key": api_key}, json=body, timeout=180)
+        latency_ms = int((time.time() - start) * 1000)
+        if response.status_code == 429 and attempt <= 5:
+            print("    (API rate limit hit; waiting 60s then retrying)")
+            time.sleep(60)
+            continue
+        break
     response.raise_for_status()
     data = response.json()
 
