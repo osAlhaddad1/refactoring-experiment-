@@ -18,8 +18,9 @@ ARCH_REPORT = os.path.join("target", "arch-report.json")
 
 def load_dotenv():
     """Loads KEY=value lines from a .env file at the repo root into the
-    environment, without overriding variables already set in the shell. Blank
-    lines and lines starting with # are ignored. Standard library only.
+    environment. Values in .env take precedence over any shell variable of the
+    same name, so .env is the single source of truth. Blank lines and lines
+    starting with # are ignored. Standard library only.
 
     This is how the GEMINI_API_KEY / GEMINI_MODEL (and optionally MVN_CMD /
     JAVA_HOME) reach the runner without being hard-coded anywhere tracked.
@@ -36,8 +37,18 @@ def load_dotenv():
             key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
+            if key:
+                os.environ[key] = value   # .env wins over any stale shell variable
+
+
+def check_maven():
+    """Runs `mvn -v` to confirm Maven can actually run. Returns (ok, message)."""
+    mvn = os.environ.get("MVN_CMD", "mvn")
+    result = subprocess.run('"%s" -v' % mvn, shell=True, capture_output=True, text=True)
+    if result.returncode == 0:
+        lines = (result.stdout or "").strip().splitlines()
+        return True, (lines[0] if lines else "Maven OK")
+    return False, ((result.stdout or "") + (result.stderr or "")).strip()
 
 
 def run_maven_test(project_dir, test_class):
@@ -73,8 +84,15 @@ def run_gate(project_dir):
     result = run_maven_test(project_dir, "ArchitectureGateTest")
 
     if not os.path.exists(report_path):
-        print("---- no arch-report.json was written; maven output (tail) ----")
-        print((result.stdout or "")[-1500:])
+        print("---- gate build wrote no report (mvn exit %d) ----" % result.returncode)
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        if out:
+            print("stdout (tail):\n" + out[-1500:])
+        if err:
+            print("stderr (tail):\n" + err[-1000:])
+        if not out and not err:
+            print("(maven produced no output at all)")
         return None
 
     with open(report_path, encoding="utf-8") as report_file:

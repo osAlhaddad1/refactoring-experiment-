@@ -1,101 +1,75 @@
-"""The experiment runner.
+"""The experiment runner (CI / pull-request version).
 
-For each (approach x run) it:
-  1. copies the project into a fresh temp folder (so runs stay isolated),
-  2. builds the prompt for that approach from the god-file in the copy,
-  3. calls the AI (or a mock) at temperature 0,
-  4. parses the returned JSON and writes/deletes files in the copy,
-  5. runs the HTTP behaviour tests, then the architecture gate,
-  6. records one row to results.csv and results.json.
-Loop approaches (5 and 6) re-prompt with the violation report until the gate
-passes or MAX_ITERS is reached.
+For each (baseline x approach x run) it:
+  1. branches off the current baseline branch into an isolated worktree,
+  2. builds the prompt and asks the AI (or a mock) to refactor the god-file,
+  3. writes the AI's files, commits, and pushes the branch,
+  4. opens a pull request, which makes GitHub Actions run the behaviour tests
+     and the architecture gate,
+  5. waits for CI, downloads the result, and records one row.
+Loop approaches re-prompt with the violation report and push again (CI re-runs)
+until the gate is green or MAX_ITERS is reached. Pull requests are left open as
+evidence.
 
-The baseline name is taken from the current git branch (read-only) or --baseline.
-Because every baseline lives on its own branch, the only thing that changes
-between branches is the god-file -- this runner stays the same.
-
-Usage examples (set MVN_CMD and JAVA_HOME first, see README):
-    python run_experiment.py --mock
-    python run_experiment.py --mock --approaches naive-local
-    python run_experiment.py --baseline complex          # real Gemini run
+Run it from the baseline branch you want to test (simple / complix / xcomplix):
+    python run_experiment.py                 # real Gemini
+    python run_experiment.py --mock          # push the mock refactoring instead
+    python run_experiment.py --approaches naive-local
 """
 
 import argparse
 import csv
 import json
 import os
-import shutil
-import subprocess
-import tempfile
+import sys
 import time
 
+import github_ci as ci
 from ai_client import call_gemini, call_mock
-from gate_runner import load_dotenv, run_gate, run_maven_test
+from gate_runner import load_dotenv
 from prompts import APPROACH_NAMES, approach_by_name, build_prompt
 
 # ---- settings (change these) ----------------------------------------------
 
-RUNS_PER_CELL = 1       # how many times to repeat each (baseline x approach); raise to 5-10 later
-MAX_ITERS = 3           # max loop iterations for the loop approaches
-SECONDS_BETWEEN_AI_CALLS = 65   # the API allows ~1 request/minute; wait at least this long between real calls
+RUNS_PER_CELL = 1               # repeats per (baseline x approach); raise to 5-10 later
+MAX_ITERS = 3                   # max loop iterations for loop approaches
+SECONDS_BETWEEN_AI_CALLS = 65   # the API allows ~1 request/minute
 
 # ---- fixed paths -----------------------------------------------------------
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
 
 GOD_FILE = "src/main/java/com/example/shop/ShopController.java"
 ARCH_RULES_FILE = "src/test/java/com/example/shop/arch/ArchRules.java"
 BEHAVIOUR_FILE = "src/test/java/com/example/shop/ShopBehaviourTest.java"
 
-# Files the AI is never allowed to change or delete (the grading harness).
+# Files the AI is never allowed to change or delete (the grading harness + CI).
 PROTECTED = {
     BEHAVIOUR_FILE,
     ARCH_RULES_FILE,
     "src/test/java/com/example/shop/arch/ArchitectureGateTest.java",
     "src/main/java/com/example/shop/ShopApplication.java",
     "pom.xml",
+    ".github/workflows/arch-gate.yml",
 }
 
 RESULTS_CSV = os.path.join(HERE, "results.csv")
 RESULTS_JSON = os.path.join(HERE, "results.json")
 
 
-# ---- helpers ---------------------------------------------------------------
-
-def current_git_branch():
-    """Returns the current git branch name, or None (read-only git call)."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=REPO, capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except OSError:
-        pass
-    return None
-
-
-def copy_project():
-    """Copies pom.xml + src/ into a fresh temp folder and returns its path."""
-    temp = tempfile.mkdtemp(prefix="run-")
-    shutil.copy(os.path.join(REPO, "pom.xml"), os.path.join(temp, "pom.xml"))
-    shutil.copytree(os.path.join(REPO, "src"), os.path.join(temp, "src"))
-    return temp
-
+# ---- file helpers ----------------------------------------------------------
 
 def read_file(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
 
 
-def build_context(work):
-    """Reads the pieces the prompt needs from the working copy."""
+def build_context(worktree):
+    """Reads the pieces the prompt needs from the worktree (baseline content)."""
     return {
-        "god_file": read_file(os.path.join(work, GOD_FILE.replace("/", os.sep))),
-        "arch_rules_source": read_file(os.path.join(work, ARCH_RULES_FILE.replace("/", os.sep))),
-        "behaviour_tests": read_file(os.path.join(work, BEHAVIOUR_FILE.replace("/", os.sep))),
+        "god_file": read_file(os.path.join(worktree, GOD_FILE.replace("/", os.sep))),
+        "arch_rules_source": read_file(os.path.join(worktree, ARCH_RULES_FILE.replace("/", os.sep))),
+        "behaviour_tests": read_file(os.path.join(worktree, BEHAVIOUR_FILE.replace("/", os.sep))),
     }
 
 
@@ -107,16 +81,16 @@ def clean_rel(path):
     return path.lstrip("/")
 
 
-def safe_target(work, rel):
-    """Returns an absolute path inside work for rel, or None if it escapes work."""
-    target = os.path.normpath(os.path.join(work, rel.replace("/", os.sep)))
-    root = os.path.normpath(work)
-    if target == root or target.startswith(root + os.sep):
+def safe_target(root, rel):
+    """Returns an absolute path inside root for rel, or None if it escapes root."""
+    target = os.path.normpath(os.path.join(root, rel.replace("/", os.sep)))
+    base = os.path.normpath(root)
+    if target == base or target.startswith(base + os.sep):
         return target
     return None
 
 
-def apply_changes(work, parsed):
+def apply_changes(worktree, parsed):
     """Writes the AI's files and deletes the ones it asked to delete, skipping
     the protected grading files and any unsafe path."""
     for item in parsed.get("files", []):
@@ -124,7 +98,7 @@ def apply_changes(work, parsed):
         if rel in PROTECTED:
             print("    (skipped protected file: %s)" % rel)
             continue
-        target = safe_target(work, rel)
+        target = safe_target(worktree, rel)
         if target is None:
             print("    (skipped unsafe path: %s)" % rel)
             continue
@@ -137,7 +111,7 @@ def apply_changes(work, parsed):
         if rel in PROTECTED:
             print("    (skipped protected delete: %s)" % rel)
             continue
-        target = safe_target(work, rel)
+        target = safe_target(worktree, rel)
         if target is not None and os.path.exists(target):
             os.remove(target)
 
@@ -156,7 +130,6 @@ def parse_ai_json(text):
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # last resort: grab the outermost { ... }
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
@@ -167,14 +140,15 @@ def parse_ai_json(text):
     return None
 
 
-_last_ai_call_time = 0.0   # when we last called the real API (for rate limiting)
+# ---- AI call with rate limiting -------------------------------------------
+
+_last_ai_call_time = 0.0
 
 
 def call_ai(prompt, args):
     global _last_ai_call_time
     if args.mock:
         return call_mock(prompt, args.mock_file)
-    # respect the API rate limit: wait until enough time has passed since the last call
     wait = SECONDS_BETWEEN_AI_CALLS - (time.time() - _last_ai_call_time)
     if wait > 0:
         print("    (waiting %ds for the API rate limit)" % int(wait))
@@ -186,24 +160,29 @@ def call_ai(prompt, args):
 # ---- one cell --------------------------------------------------------------
 
 def run_cell(baseline, approach, run_number, args):
-    """Runs one (baseline x approach x run), looping if it is a loop approach."""
-    max_iters = args.max_iters if approach["loop"] else 1
+    """Runs one (baseline x approach x run) as a branch + PR + CI, looping if
+    it is a loop approach."""
+    branch = "exp/%s/%s/r%d" % (baseline, approach["name"], run_number)
+    worktree = ci.add_worktree(branch, baseline)
 
+    max_iters = args.max_iters if approach["loop"] else 1
     report_text = None
     iterations = 0
     build_passed = False
     behaviour_passed = False
     violation_count = None
     violation_types = []
-    input_tokens = 0
-    output_tokens = 0
-    latency_ms = 0
+    input_tokens = output_tokens = latency_ms = 0
+    pr_url = ""
+    pushed = False
 
-    while iterations < max_iters:
-        iterations += 1
-        work = copy_project()
-        try:
-            context = build_context(work)
+    try:
+        while iterations < max_iters:
+            iterations += 1
+            if iterations > 1:
+                ci.reset_worktree_to(worktree, baseline)  # start again from the baseline
+
+            context = build_context(worktree)
             prompt = build_prompt(approach, context, report_text)
 
             ai = call_ai(prompt, args)
@@ -214,35 +193,44 @@ def run_cell(baseline, approach, run_number, args):
             parsed = parse_ai_json(ai["text"])
             if parsed is None:
                 print("    iteration %d: could not parse the AI JSON" % iterations)
-                build_passed = False
-                behaviour_passed = False
-                violation_count = None
                 break
 
-            apply_changes(work, parsed)
+            apply_changes(worktree, parsed)
 
-            behaviour = run_maven_test(work, "ShopBehaviourTest")
-            behaviour_passed = (behaviour.returncode == 0)
-
-            report = run_gate(work)
-            if report is None:
-                print("    iteration %d: build failed (no gate report)" % iterations)
-                build_passed = False
-                violation_count = None
-                violation_types = []
+            seen_before = ci.run_ids(branch)
+            message = "%s / %s / run %d / iteration %d" % (baseline, approach["name"], run_number, iterations)
+            committed = ci.commit_and_push(worktree, branch, message)
+            if committed is None:
+                print("    iteration %d: the AI produced no change; stopping" % iterations)
                 break
+            pushed = True
+            if iterations == 1:
+                pr_url = ci.create_pr(
+                    baseline, branch,
+                    "exp: %s / %s (run %d)" % (baseline, approach["name"], run_number),
+                    "Automated experiment run. The architecture gate runs in CI.")
 
-            build_passed = True
-            violation_count = report["violationCount"]
-            violation_types = sorted(set(v["type"] for v in report["violations"]))
-            print("    iteration %d: behaviour_passed=%s violations=%d"
-                  % (iterations, behaviour_passed, violation_count))
+            run_id = ci.wait_for_new_run(branch, seen_before)
+            print("    iteration %d: waiting for CI run %s ..." % (iterations, run_id))
+            ci.wait_until_complete(run_id)
+            result = ci.read_ci_results(run_id)
 
-            if violation_count == 0:
-                break
-            report_text = json.dumps(report)  # feed back into the next loop
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
+            build_passed = result["build_passed"]
+            behaviour_passed = result["behaviour_passed"]
+            violation_count = result["violation_count"]
+            violation_types = result["violation_types"]
+            print("    iteration %d: build=%s behaviour=%s violations=%s"
+                  % (iterations, build_passed, behaviour_passed, violation_count))
+
+            if build_passed and violation_count == 0:
+                break  # gate is green, done
+            if result["report"] is None:
+                break  # build failed: no violation report to feed back, so looping cannot help
+            report_text = json.dumps(result["report"])  # feed the violations back for the next iteration
+    finally:
+        ci.remove_worktree(worktree)
+        if not pushed:
+            ci.delete_local_branch(branch)  # nothing was pushed, so drop the empty branch
 
     return {
         "baseline": baseline,
@@ -256,6 +244,7 @@ def run_cell(baseline, approach, run_number, args):
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "latency_ms": latency_ms,
+        "pr_url": pr_url,
     }
 
 
@@ -267,14 +256,14 @@ def write_results(rows):
         writer.writerow([
             "baseline", "approach", "run", "build_passed", "behaviour_passed",
             "violation_count", "violation_types", "iterations",
-            "input_tokens", "output_tokens", "latency_ms",
+            "input_tokens", "output_tokens", "latency_ms", "pr_url",
         ])
         for r in rows:
             writer.writerow([
                 r["baseline"], r["approach"], r["run"], r["build_passed"], r["behaviour_passed"],
                 "" if r["violation_count"] is None else r["violation_count"],
                 ";".join(r["violation_types"]), r["iterations"],
-                r["input_tokens"], r["output_tokens"], r["latency_ms"],
+                r["input_tokens"], r["output_tokens"], r["latency_ms"], r["pr_url"],
             ])
 
     with open(RESULTS_JSON, "w", encoding="utf-8") as f:
@@ -284,46 +273,58 @@ def write_results(rows):
 # ---- main ------------------------------------------------------------------
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the refactoring experiment.")
+    parser = argparse.ArgumentParser(description="Run the refactoring experiment via CI/PRs.")
     parser.add_argument("--baseline", default=None,
-                        help="baseline name (default: current git branch)")
+                        help="baseline name for the results (default: current git branch)")
     parser.add_argument("--mock", action="store_true",
-                        help="use the mock AI response instead of calling Gemini")
+                        help="push the mock refactoring instead of calling Gemini")
     parser.add_argument("--mock-file", default=os.path.join(HERE, "mock_response.json"),
                         help="the hardcoded JSON file to use with --mock")
     parser.add_argument("--approaches", nargs="*", default=APPROACH_NAMES,
                         choices=APPROACH_NAMES, help="which approaches to run")
     parser.add_argument("--runs", type=int, default=RUNS_PER_CELL,
-                        help="how many runs per (baseline x approach)")
+                        help="last run number per (baseline x approach)")
+    parser.add_argument("--start-run", type=int, default=1,
+                        help="first run number (use to add runs without redoing existing ones)")
     parser.add_argument("--max-iters", type=int, default=MAX_ITERS,
                         help="max loop iterations for loop approaches")
     return parser.parse_args()
 
 
 def main():
-    load_dotenv()   # read .env at the repo root (if present) before we need the API key
+    load_dotenv()
     args = parse_args()
-    baseline = args.baseline or current_git_branch() or "unknown"
 
-    print("baseline = %s" % baseline)
+    branch = ci.current_branch()
+    baseline = args.baseline or branch
+    print("running on branch '%s' (baseline label: '%s')" % (branch, baseline))
+
+    # Append to whatever results already exist, so approaches/baselines run in
+    # separate invocations all accumulate into one results file.
     rows = []
+    if os.path.exists(RESULTS_JSON):
+        with open(RESULTS_JSON, encoding="utf-8") as f:
+            rows = json.load(f)
+
     for name in args.approaches:
         approach = approach_by_name(name)
-        for run_number in range(1, args.runs + 1):
+        for run_number in range(args.start_run, args.runs + 1):
             print("== %s / %s / run %d ==" % (baseline, name, run_number))
-            rows.append(run_cell(baseline, approach, run_number, args))
-            write_results(rows)   # save after every cell so a long run never loses progress
-
-    write_results(rows)
+            try:
+                rows.append(run_cell(baseline, approach, run_number, args))
+                write_results(rows)   # save after every cell so a long run never loses progress
+            except Exception as error:
+                print("    !! cell failed (%s: %s); skipping. Re-run later with --approaches %s"
+                      % (error.__class__.__name__, error, name))
 
     print()
     print("wrote %s and %s" % (RESULTS_CSV, RESULTS_JSON))
     print()
-    print("%-24s %-6s %-6s %-10s %s" % ("approach", "build", "behav", "violations", "iters"))
+    print("%-22s %-6s %-6s %-10s %-5s %s" % ("approach", "build", "behav", "violations", "iters", "pr"))
     for r in rows:
         vcount = "-" if r["violation_count"] is None else str(r["violation_count"])
-        print("%-24s %-6s %-6s %-10s %d"
-              % (r["approach"], r["build_passed"], r["behaviour_passed"], vcount, r["iterations"]))
+        print("%-22s %-6s %-6s %-10s %-5d %s"
+              % (r["approach"], r["build_passed"], r["behaviour_passed"], vcount, r["iterations"], r["pr_url"]))
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ JAVA_HOME=C:\Users\osami\.jdks\corretto-23.0.2
 
 `.env` is gitignored (never committed) and persists across branch checkouts.
 `run_experiment.py` and `validate_detector.py` read it automatically on start.
-Shell environment variables, if set, take precedence over `.env`.
+Values in `.env` take precedence over any shell variables of the same name.
 
 You can also just set them in the shell instead:
 

@@ -1,0 +1,62 @@
+name: Architecture gate
+
+# Runs on every pull request (when opened and when new commits are pushed to it),
+# which is how each experiment run gets its checks.
+on:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the PR code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # The two checks are run as separate steps so we can tell them apart.
+      # continue-on-error lets the gate run even if the behaviour tests failed.
+      - name: HTTP behaviour tests
+        id: behaviour
+        run: mvn -q -Dtest=ShopBehaviourTest test
+        continue-on-error: true
+
+      - name: Architecture gate
+        id: gate
+        run: mvn -q -Dtest=ArchitectureGateTest test
+        continue-on-error: true
+
+      # The gate always writes target/arch-report.json (even when it fails),
+      # so the runner can download it and read the violations.
+      - name: Upload architecture report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-report
+          path: target/arch-report.json
+          if-no-files-found: warn
+
+      - name: Write result summary
+        if: always()
+        run: |
+          echo "behaviour=${{ steps.behaviour.outcome }}" > result.txt
+          echo "gate=${{ steps.gate.outcome }}" >> result.txt
+          cat result.txt
+
+      - name: Upload result summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-summary
+          path: result.txt
+
+      - name: Fail the check if behaviour or gate failed
+        if: ${{ steps.behaviour.outcome != 'success' || steps.gate.outcome != 'success' }}
+        run: |
+          echo "behaviour=${{ steps.behaviour.outcome }} gate=${{ steps.gate.outcome }}"
+          exit 1

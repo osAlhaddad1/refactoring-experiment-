@@ -26,21 +26,34 @@ def call_gemini(prompt):
         sys.exit(1)
 
     url = GEMINI_URL % model
+    # Pass the key as a header, never in the URL, so it cannot leak into error
+    # messages or logs.
+    headers = {"x-goog-api-key": api_key}
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0},
     }
 
-    # send the request; if we are rate-limited (HTTP 429), wait and retry
+    # retry on rate limits (429), transient server errors (5xx), and network errors
     attempt = 0
     while True:
         attempt = attempt + 1
         start = time.time()
-        response = requests.post(url, params={"key": api_key}, json=body, timeout=180)
+        try:
+            response = requests.post(url, headers=headers, json=body, timeout=300)
+        except requests.exceptions.RequestException as error:
+            if attempt <= 5:
+                print("    (network problem calling Gemini: %s; waiting 30s then retrying)"
+                      % error.__class__.__name__)
+                time.sleep(30)
+                continue
+            raise
         latency_ms = int((time.time() - start) * 1000)
-        if response.status_code == 429 and attempt <= 5:
-            print("    (API rate limit hit; waiting 60s then retrying)")
-            time.sleep(60)
+        if (response.status_code == 429 or response.status_code >= 500) and attempt <= 5:
+            wait = 60 if response.status_code == 429 else 20
+            print("    (Gemini returned HTTP %d; waiting %ds then retrying)"
+                  % (response.status_code, wait))
+            time.sleep(wait)
             continue
         break
     response.raise_for_status()
