@@ -18,7 +18,7 @@ import os
 import shutil
 import tempfile
 
-from gate_runner import run_gate
+from gate_runner import load_dotenv, run_gate
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -72,6 +72,7 @@ def list_fixtures(label):
 
 
 def main():
+    load_dotenv()   # read .env at the repo root (if present), e.g. MVN_CMD / JAVA_HOME
     # build the list of (name, path, should_be_flagged)
     cases = []
     for name, path in list_fixtures("violating"):
