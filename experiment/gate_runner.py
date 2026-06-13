@@ -13,10 +13,31 @@ import json
 import os
 import subprocess
 
-# Full path to mvn (or just "mvn" if it is on PATH). Set MVN_CMD to override.
-MVN = os.environ.get("MVN_CMD", "mvn")
-
 ARCH_REPORT = os.path.join("target", "arch-report.json")
+
+
+def load_dotenv():
+    """Loads KEY=value lines from a .env file at the repo root into the
+    environment, without overriding variables already set in the shell. Blank
+    lines and lines starting with # are ignored. Standard library only.
+
+    This is how the GEMINI_API_KEY / GEMINI_MODEL (and optionally MVN_CMD /
+    JAVA_HOME) reach the runner without being hard-coded anywhere tracked.
+    """
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_path = os.path.join(repo, ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, encoding="utf-8") as env_file:
+        for line in env_file:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
 
 
 def run_maven_test(project_dir, test_class):
@@ -26,7 +47,8 @@ def run_maven_test(project_dir, test_class):
     code and the captured output). We use shell=True because mvn is a .cmd file
     on Windows.
     """
-    command = '"%s" -q -Dtest=%s test' % (MVN, test_class)
+    mvn = os.environ.get("MVN_CMD", "mvn")
+    command = '"%s" -q -Dtest=%s test' % (mvn, test_class)
     return subprocess.run(
         command,
         cwd=project_dir,

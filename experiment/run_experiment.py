@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 
 from ai_client import call_gemini, call_mock
-from gate_runner import run_gate, run_maven_test
+from gate_runner import load_dotenv, run_gate, run_maven_test
 from prompts import APPROACH_NAMES, approach_by_name, build_prompt
 
 # ---- settings (change these) ----------------------------------------------
@@ -289,6 +289,7 @@ def parse_args():
 
 
 def main():
+    load_dotenv()   # read .env at the repo root (if present) before we need the API key
     args = parse_args()
     baseline = args.baseline or current_git_branch() or "unknown"
 
