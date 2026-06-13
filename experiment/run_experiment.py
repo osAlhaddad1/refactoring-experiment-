@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 
 from ai_client import call_gemini, call_mock
 from gate_runner import load_dotenv, run_gate, run_maven_test
@@ -36,6 +37,7 @@ from prompts import APPROACH_NAMES, approach_by_name, build_prompt
 
 RUNS_PER_CELL = 1       # how many times to repeat each (baseline x approach); raise to 5-10 later
 MAX_ITERS = 3           # max loop iterations for the loop approaches
+SECONDS_BETWEEN_AI_CALLS = 65   # the API allows ~1 request/minute; wait at least this long between real calls
 
 # ---- fixed paths -----------------------------------------------------------
 
@@ -165,9 +167,19 @@ def parse_ai_json(text):
     return None
 
 
+_last_ai_call_time = 0.0   # when we last called the real API (for rate limiting)
+
+
 def call_ai(prompt, args):
+    global _last_ai_call_time
     if args.mock:
         return call_mock(prompt, args.mock_file)
+    # respect the API rate limit: wait until enough time has passed since the last call
+    wait = SECONDS_BETWEEN_AI_CALLS - (time.time() - _last_ai_call_time)
+    if wait > 0:
+        print("    (waiting %ds for the API rate limit)" % int(wait))
+        time.sleep(wait)
+    _last_ai_call_time = time.time()
     return call_gemini(prompt)
 
 
@@ -300,6 +312,7 @@ def main():
         for run_number in range(1, args.runs + 1):
             print("== %s / %s / run %d ==" % (baseline, name, run_number))
             rows.append(run_cell(baseline, approach, run_number, args))
+            write_results(rows)   # save after every cell so a long run never loses progress
 
     write_results(rows)
 
